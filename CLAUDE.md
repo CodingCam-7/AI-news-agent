@@ -1,0 +1,45 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Running the project
+
+```bash
+# Activate the venv (already exists at .venv/)
+source .venv/bin/activate
+
+# Install / sync dependencies
+pip install -r requirements.txt
+
+# Run fetch-only report
+python fetcher.py
+
+# Run ranked report (fetches + scores in one shot)
+python ranker.py
+```
+
+In PyCharm, open either file and press ▶ — no run configuration needed.
+
+## Architecture
+
+This is a pipeline project being built incrementally. Each step is planned as its own module:
+
+1. **Fetch** (`fetcher.py`) — done. Pulls `NewsItem` objects from RSS feeds and Hacker News.
+2. **Rank** (`ranker.py`) — done. Scores items against `TOPICS`; wraps each in `RankedItem(item, score, matched_topics)`.
+3. **Summarize** — LLM-generated digest snippets.
+4. **Email** — send formatted digest.
+5. **State / scheduling** — Firebase for dedup across runs; GitHub Actions cron every 2 days.
+
+`fetcher.py` owns the `NewsItem` dataclass and all fetch logic. `ranker.py` owns `RankedItem` and scoring; it imports `fetch_all()` directly and can be run standalone. `config.py` holds the shared configuration (`RSS_FEEDS`, `TOPICS`, `TOPIC_ALIASES`) imported by all steps.
+
+## Key constraints
+
+**RSS fetch pattern:** Always use `requests.get()` to download feed content, then pass `resp.content` (bytes) to `feedparser.parse()`. Do **not** pass URLs directly to `feedparser.parse()` — feedparser's built-in urllib fetch fails SSL verification on macOS because Python's bundled SSL doesn't use the system keychain. `requests` ships with `certifi` and avoids this.
+
+**Per-feed fault isolation:** Each RSS feed is wrapped in its own `try/except`. A broken feed must log a `WARNING` and continue — never raise or abort the run.
+
+**Lookback window:** `LOOKBACK_DAYS = 5` in `fetcher.py`. Items with a known `published` date older than this are filtered out. Items with no date are kept.
+
+**Deduplication:** Done by exact URL match in `fetch_all()`. Keep this as the single dedup point when adding new sources.
+
+**Topic matching:** `ranker.py` checks each topic's main phrase plus all entries in `TOPIC_ALIASES` (from `config.py`). Add synonyms/abbreviations there explicitly — don't add magic normalization to the scorer. Title hit = 2 pts, snippet hit = 1 pt; a topic scores at most 3 pts regardless of how many alias phrases match.
