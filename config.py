@@ -6,9 +6,7 @@ RSS_FEEDS = [
     ("VentureBeat AI", "https://venturebeat.com/category/ai/feed/"),
 ]
 
-# Used in the next step (ranking) to score articles by topic relevance.
-# Niche topics like "AI in hospitality and wine" are intentionally included
-# so the ranker can surface rare-but-relevant stories.
+# Primary topic labels — used as display names in the digest.
 TOPICS = [
     "large language models",
     "AI agents",
@@ -16,3 +14,14 @@ TOPICS = [
     "AI policy",
     "AI in hospitality and wine",
 ]
+
+# Additional search phrases checked alongside each topic.
+# Add synonyms, abbreviations, or singular/plural variants here
+# rather than relying on magic normalization.
+TOPIC_ALIASES: dict[str, list[str]] = {
+    "large language models": ["large language model", "LLM", "LLMs", "foundation model", "foundation models"],
+    "AI agents":             ["AI agent", "agentic", "autonomous agent", "autonomous agents", "multi-agent"],
+    "AI tooling":            ["AI tool", "AI tools", "AI SDK", "developer tool", "AI framework", "AI infrastructure"],
+    "AI policy":             ["AI regulation", "AI governance", "AI law", "AI safety", "AI ban", "AI policy"],
+    "AI in hospitality and wine": ["restaurant AI", "hospitality AI", "wine AI", "sommelier AI", "hotel AI"],
+}
