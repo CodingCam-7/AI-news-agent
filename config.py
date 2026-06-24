@@ -6,7 +6,7 @@ RECIPIENTS = [
     },
     {
         "email": "djpentz@gmail.com",
-        "name": "Dad",
+        "name": "Paps",
         "topics": ["large language models", "AI agents", "AI tooling", "AI policy", "AI in hospitality and wine"],
     },
     # {"email": "brother@example.com", "name": "Brother", "topics": [...]},
