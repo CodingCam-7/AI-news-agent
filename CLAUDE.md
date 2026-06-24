@@ -55,6 +55,8 @@ This is a pipeline project being built incrementally. Each step is planned as it
 
 **Topic matching:** `ranker.py` checks each topic's main phrase plus all entries in `TOPIC_ALIASES` (from `config.py`). Add synonyms/abbreviations there explicitly — don't add magic normalization to the scorer. Title hit = 2 pts, snippet hit = 1 pt; a topic scores at most 3 pts regardless of how many alias phrases match.
 
+**Adding or updating recipients:** Edit `RECIPIENTS` in `config.py`. Each entry needs `email`, `name`, and `topics` (a subset of the `TOPICS` list). The emailer sends one personalised email per recipient containing only articles matching their chosen topics. Articles are grouped by topic in the email.
+
 **Firebase deduplication:** `state.py` resolves credentials in this order: (1) `FIREBASE_CREDENTIALS` env var (JSON string — used in CI), (2) `firebase-credentials.json` file in the project root (gitignored, used locally). If neither is present, dedup is silently disabled and all matched items are sent. The Firestore collection is `seen_articles`; document IDs are SHA-1 hashes of the article URL.
 
 **GitHub Actions secrets required:** `ANTHROPIC_API_KEY`, `GMAIL_USER`, `GMAIL_APP_PASSWORD`, `FIREBASE_CREDENTIALS` (the full service-account JSON as a single-line string). Set at Settings → Secrets and variables → Actions.

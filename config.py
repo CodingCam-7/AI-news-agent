@@ -1,7 +1,15 @@
-DIGEST_RECIPIENTS = [
-    "owner@example.com",
-    "recipient1@example.com",
-    # "brother@example.com",
+RECIPIENTS = [
+    {
+        "email": "owner@example.com",
+        "name": "Cameron",
+        "topics": ["large language models", "AI agents", "AI tooling", "AI policy", "AI in hospitality and wine"],
+    },
+    {
+        "email": "recipient1@example.com",
+        "name": "Dad",
+        "topics": ["large language models", "AI agents", "AI tooling", "AI policy", "AI in hospitality and wine"],
+    },
+    # {"email": "brother@example.com", "name": "Brother", "topics": [...]},
 ]
 
 RSS_FEEDS = [

@@ -1,14 +1,14 @@
 """
 emailer.py — Step 4 of the AI News Digest Agent.
 
-Formats the ranked+summarized digest into an HTML+plain-text email and sends
-it via Gmail SMTP. Run directly to execute the full pipeline:
-fetch → rank → summarize → email.
+Formats the ranked+summarized digest into a newsletter-style HTML email and
+sends a personalised copy to each recipient defined in config.RECIPIENTS.
+Run directly to execute the full pipeline: fetch → rank → summarize → email.
 
 Required environment variables:
-  ANTHROPIC_API_KEY   — for the summarization step
-  GMAIL_USER          — Gmail address used as the sender
-  GMAIL_APP_PASSWORD  — 16-char App Password (myaccount.google.com/apppasswords)
+  ANTHROPIC_API_KEY    — for the summarization step
+  GMAIL_USER           — Gmail address used as the sender
+  GMAIL_APP_PASSWORD   — 16-char App Password (myaccount.google.com/apppasswords)
   FIREBASE_CREDENTIALS — service-account JSON string (optional; enables dedup)
 """
 
@@ -22,7 +22,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from urllib.parse import urlparse
 
-from config import DIGEST_RECIPIENTS
+from config import RECIPIENTS
 from fetcher import fetch_all
 from ranker import RankedItem, rank
 from state import load_seen, mark_seen
@@ -33,9 +33,18 @@ logger = logging.getLogger(__name__)
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
 
+# Background color per topic — all light enough to read on white, black-outlined in the template.
+TOPIC_COLORS: dict[str, str] = {
+    "large language models":      "#bbf7d0",  # light green
+    "AI agents":                  "#bae6fd",  # light blue
+    "AI tooling":                 "#a5f3fc",  # cyan
+    "AI policy":                  "#c7d2fe",  # soft indigo
+    "AI in hospitality and wine": "#d1fae5",  # pale green
+}
+
 
 def _safe_url(url: str) -> str:
-    """Allow only http/https URLs — anything else is replaced with a safe fallback."""
+    """Allow only http/https URLs — anything else becomes a safe fallback."""
     try:
         if urlparse(url).scheme in ("http", "https"):
             return url
@@ -44,68 +53,129 @@ def _safe_url(url: str) -> str:
     return "#"
 
 
-def _plain_body(items: list[RankedItem], date_str: str) -> str:
-    lines = [
-        f"AI News Digest — {date_str}",
-        f"{len(items)} matched item(s)",
-        "=" * 60,
-    ]
-    for r in items:
-        pub = r.item.published.strftime("%Y-%m-%d") if r.item.published else "no date"
-        topics = ", ".join(r.matched_topics)
-        lines += [
-            "",
-            f"[{r.score:.0f}pt] {r.item.title}",
-            f"{r.item.source}  |  {pub}  |  {topics}",
-            r.item.url,
-        ]
-        if r.summary:
-            lines += ["", r.summary]
-    lines += ["", "-" * 60, "Delivered by AI News Agent"]
-    return "\n".join(lines)
+def _group_by_topic(items: list[RankedItem], topics: list[str]) -> dict[str, list[RankedItem]]:
+    """Assign each item to the first of the recipient's topics it matched."""
+    groups: dict[str, list[RankedItem]] = {t: [] for t in topics}
+    for item in items:
+        for topic in topics:
+            if topic in item.matched_topics:
+                groups[topic].append(item)
+                break  # each article appears once, under its best-matching topic
+    return {t: v for t, v in groups.items() if v}
 
 
-def _html_body(items: list[RankedItem], date_str: str) -> str:
-    item_blocks = []
+def _topic_section_html(topic: str, items: list[RankedItem]) -> str:
+    color = TOPIC_COLORS.get(topic, "#e5e7eb")
+    cards = ""
     for r in items:
-        pub = r.item.published.strftime("%Y-%m-%d") if r.item.published else "no date"
-        topics = html.escape(", ".join(r.matched_topics))
-        title = html.escape(r.item.title)
+        pub = r.item.published.strftime("%b %d, %Y") if r.item.published else "no date"
         source = html.escape(r.item.source)
-        summary = html.escape(r.summary)
+        title = html.escape(r.item.title)
+        summary = html.escape(r.summary) if r.summary else ""
         url = _safe_url(r.item.url)
-        summary_html = f'<p style="margin:8px 0 0;font-size:15px;line-height:1.65;color:#333;">{summary}</p>' if summary else ""
-        item_blocks.append(f"""
-    <div style="margin-bottom:28px;padding-bottom:28px;border-bottom:1px solid #e0e0e0;">
-      <h2 style="margin:0 0 4px;font-size:16px;font-weight:600;">
-        <a href="{url}" style="color:#1a0dab;text-decoration:none;">{title}</a>
-      </h2>
-      <p style="margin:0;font-size:12px;color:#777;">{source}&nbsp;&middot;&nbsp;{pub}&nbsp;&middot;&nbsp;{topics}</p>
-      {summary_html}
-    </div>""")
+        summary_block = f"""
+            <tr><td style="padding:0 20px 14px;">
+              <p style="margin:0;font-size:14px;line-height:1.7;color:#333;">{summary}</p>
+            </td></tr>""" if summary else ""
+        cards += f"""
+        <tr><td style="padding:0 24px 16px;">
+          <table width="100%" cellpadding="0" cellspacing="0"
+                 style="border:2px solid #000;background:#fff;">
+            <tr><td style="padding:16px 20px 10px;">
+              <p style="margin:0 0 5px;font-size:11px;color:#555;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">
+                {source}&nbsp;&nbsp;&middot;&nbsp;&nbsp;{pub}
+              </p>
+              <h3 style="margin:0;font-size:16px;font-weight:700;line-height:1.4;">
+                <a href="{url}" style="color:#000;text-decoration:none;">{title}</a>
+              </h3>
+            </td></tr>
+            {summary_block}
+            <tr><td style="padding:0 20px 16px;">
+              <a href="{url}"
+                 style="display:inline-block;padding:7px 16px;background:#0284c7;color:#fff;
+                        font-size:12px;font-weight:700;text-decoration:none;
+                        border:2px solid #000;letter-spacing:0.3px;">
+                Read more &rarr;
+              </a>
+            </td></tr>
+          </table>
+        </td></tr>"""
 
-    body = "\n".join(item_blocks)
+    return f"""
+        <tr><td style="background:{color};border-top:2px solid #000;border-bottom:2px solid #000;
+                       padding:10px 24px;">
+          <span style="font-size:10px;font-weight:800;letter-spacing:2px;
+                       color:#000;text-transform:uppercase;">{html.escape(topic)}</span>
+        </td></tr>
+        <tr><td style="padding:20px 0 4px;">{cards}</td></tr>"""
+
+
+def _html_body(items: list[RankedItem], recipient: dict, date_str: str) -> str:
+    name = html.escape(recipient.get("name", ""))
+    groups = _group_by_topic(items, recipient["topics"])
+    sections = "".join(_topic_section_html(t, v) for t, v in groups.items())
+    n = len(items)
+    article_word = "article" if n == 1 else "articles"
+
     return f"""<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"></head>
-<body style="font-family:Georgia,serif;max-width:640px;margin:0 auto;padding:24px 16px;color:#222;background:#fff;">
-  <header style="border-bottom:3px solid #222;padding-bottom:12px;margin-bottom:28px;">
-    <h1 style="margin:0;font-size:22px;letter-spacing:-0.5px;">AI News Digest</h1>
-    <p style="margin:4px 0 0;font-size:13px;color:#666;">{date_str}&nbsp;&middot;&nbsp;{len(items)} item(s)</p>
-  </header>
-  {body}
-  <footer style="margin-top:16px;font-size:11px;color:#aaa;">Delivered by AI News Agent</footer>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+</head>
+<body style="margin:0;padding:0;background:#f0fdf4;font-family:Arial,Helvetica,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0fdf4;">
+  <tr><td align="center" style="padding:24px 12px;">
+    <table width="600" cellpadding="0" cellspacing="0"
+           style="max-width:600px;width:100%;border:2px solid #000;">
+
+      <!-- Header -->
+      <tr><td style="background:#14532d;padding:28px 28px 22px;border-bottom:2px solid #000;">
+        <h1 style="margin:0 0 8px;color:#fff;font-size:26px;font-weight:800;
+                   letter-spacing:-0.5px;">&#129302; AI News Digest</h1>
+        <p style="margin:0;color:#86efac;font-size:13px;">
+          Hi {name}&nbsp;&nbsp;&middot;&nbsp;&nbsp;{date_str}&nbsp;&nbsp;&middot;&nbsp;&nbsp;{n} {article_word} matched your topics
+        </p>
+      </td></tr>
+
+      <!-- Article sections grouped by topic -->
+      {sections}
+
+      <!-- Footer -->
+      <tr><td style="background:#dcfce7;border-top:2px solid #000;
+                     padding:16px 28px;text-align:center;">
+        <p style="margin:0;font-size:11px;color:#166534;">
+          AI News Agent &nbsp;&middot;&nbsp; Delivered every 2 days &nbsp;&middot;&nbsp; {date_str}
+        </p>
+      </td></tr>
+
+    </table>
+  </td></tr>
+</table>
 </body>
 </html>"""
 
 
-def send_digest(ranked: list[RankedItem]) -> None:
-    """Send the digest email for all items with score > 0."""
-    scored = [r for r in ranked if r.score > 0]
-    if not scored:
-        logger.warning("No matched items — skipping email send.")
-        return
+def _plain_body(items: list[RankedItem], recipient: dict, date_str: str) -> str:
+    name = recipient.get("name", "")
+    lines = [
+        f"AI News Digest — {date_str}",
+        f"Hi {name} — {len(items)} article(s) matched your topics",
+        "=" * 60,
+    ]
+    for topic, topic_items in _group_by_topic(items, recipient["topics"]).items():
+        lines += ["", f"── {topic.upper()} ──"]
+        for r in topic_items:
+            pub = r.item.published.strftime("%Y-%m-%d") if r.item.published else "no date"
+            lines += ["", r.item.title, f"{r.item.source} · {pub}", r.item.url]
+            if r.summary:
+                lines += ["", r.summary]
+    lines += ["", "-" * 60, "Delivered by AI News Agent"]
+    return "\n".join(lines)
 
+
+def send_digest(ranked: list[RankedItem]) -> None:
+    """Send a personalised newsletter digest to each recipient in config.RECIPIENTS."""
     gmail_user = os.environ.get("GMAIL_USER")
     gmail_password = os.environ.get("GMAIL_APP_PASSWORD")
     if not gmail_user or not gmail_password:
@@ -116,23 +186,37 @@ def send_digest(ranked: list[RankedItem]) -> None:
         )
         sys.exit(1)
 
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    subject = f"AI News Digest — {date_str} | {len(scored)} item(s)"
+    date_str = datetime.now().strftime("%B %d, %Y")
+    scored = [r for r in ranked if r.score > 0]
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = gmail_user
-    msg["To"] = ", ".join(DIGEST_RECIPIENTS)
-    msg.attach(MIMEText(_plain_body(scored, date_str), "plain"))
-    msg.attach(MIMEText(_html_body(scored, date_str), "html"))
+    if not scored:
+        logger.warning("No matched items — skipping email send.")
+        return
 
     with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
         smtp.ehlo()
         smtp.starttls()
         smtp.login(gmail_user, gmail_password)
-        smtp.sendmail(gmail_user, DIGEST_RECIPIENTS, msg.as_string())
 
-    print(f"Digest sent to {', '.join(DIGEST_RECIPIENTS)} ({len(scored)} item(s)).")
+        for recipient in RECIPIENTS:
+            recipient_items = [
+                r for r in scored
+                if any(t in r.matched_topics for t in recipient["topics"])
+            ]
+            if not recipient_items:
+                logger.warning("No matched items for %s — skipping.", recipient["email"])
+                continue
+
+            subject = f"AI News Digest — {date_str} | {len(recipient_items)} article(s)"
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"] = gmail_user
+            msg["To"] = recipient["email"]
+            msg.attach(MIMEText(_plain_body(recipient_items, recipient, date_str), "plain"))
+            msg.attach(MIMEText(_html_body(recipient_items, recipient, date_str), "html"))
+
+            smtp.sendmail(gmail_user, recipient["email"], msg.as_string())
+            print(f"Digest sent to {recipient['name']} <{recipient['email']}> ({len(recipient_items)} article(s)).")
 
 
 # ── entry point ───────────────────────────────────────────────────────────────
@@ -143,7 +227,7 @@ if __name__ == "__main__":
     raw = fetch_all()
     ranked = rank(raw)
 
-    # Drop already-sent scored items before summarizing to avoid wasting API calls.
+    # Filter already-sent items before summarizing to avoid wasting API calls.
     seen = load_seen()
     new_ranked = [r for r in ranked if r.score == 0 or r.item.url not in seen]
     skipped = len(ranked) - len(new_ranked)
@@ -153,5 +237,5 @@ if __name__ == "__main__":
     summarize(new_ranked)
     send_digest(new_ranked)
 
-    # Persist the URLs we just sent so they're skipped on the next run.
+    # Persist sent URLs so they're skipped on the next run.
     mark_seen([r.item.url for r in new_ranked if r.score > 0])
