@@ -39,7 +39,7 @@ This is a pipeline project being built incrementally. Each step is planned as it
 2. **Rank** (`ranker.py`) — done. Scores items against `TOPICS`; wraps each in `RankedItem(item, score, matched_topics)`.
 3. **Summarize** (`summarizer.py`) — done. Calls Claude Haiku for 2-3 sentence summaries; populates `RankedItem.summary`.
 4. **Email** (`emailer.py`) — done. Formats digest as HTML+plain-text and sends via Gmail SMTP.
-5. **State / scheduling** — Firebase for dedup across runs; GitHub Actions cron every 2 days.
+5. **State / scheduling** — done. `state.py` reads/writes seen article URLs to Firestore; `.github/workflows/digest.yml` runs `emailer.py` on a cron every 2 days.
 
 `fetcher.py` owns the `NewsItem` dataclass and all fetch logic. `ranker.py` owns `RankedItem` and scoring; it imports `fetch_all()` directly and can be run standalone. `config.py` holds the shared configuration (`RSS_FEEDS`, `TOPICS`, `TOPIC_ALIASES`) imported by all steps.
 
@@ -54,3 +54,7 @@ This is a pipeline project being built incrementally. Each step is planned as it
 **Deduplication:** Done by exact URL match in `fetch_all()`. Keep this as the single dedup point when adding new sources.
 
 **Topic matching:** `ranker.py` checks each topic's main phrase plus all entries in `TOPIC_ALIASES` (from `config.py`). Add synonyms/abbreviations there explicitly — don't add magic normalization to the scorer. Title hit = 2 pts, snippet hit = 1 pt; a topic scores at most 3 pts regardless of how many alias phrases match.
+
+**Firebase deduplication:** `state.py` resolves credentials in this order: (1) `FIREBASE_CREDENTIALS` env var (JSON string — used in CI), (2) `firebase-credentials.json` file in the project root (gitignored, used locally). If neither is present, dedup is silently disabled and all matched items are sent. The Firestore collection is `seen_articles`; document IDs are SHA-1 hashes of the article URL.
+
+**GitHub Actions secrets required:** `ANTHROPIC_API_KEY`, `GMAIL_USER`, `GMAIL_APP_PASSWORD`, `FIREBASE_CREDENTIALS` (the full service-account JSON as a single-line string). Set at Settings → Secrets and variables → Actions.

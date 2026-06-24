@@ -9,6 +9,7 @@ Required environment variables:
   ANTHROPIC_API_KEY   — for the summarization step
   GMAIL_USER          — Gmail address used as the sender
   GMAIL_APP_PASSWORD  — 16-char App Password (myaccount.google.com/apppasswords)
+  FIREBASE_CREDENTIALS — service-account JSON string (optional; enables dedup)
 """
 
 import logging
@@ -22,6 +23,7 @@ from email.mime.text import MIMEText
 from config import DIGEST_RECIPIENT
 from fetcher import fetch_all
 from ranker import RankedItem, rank
+from state import load_seen, mark_seen
 from summarizer import summarize
 
 logger = logging.getLogger(__name__)
@@ -124,5 +126,16 @@ if __name__ == "__main__":
 
     raw = fetch_all()
     ranked = rank(raw)
-    summarize(ranked)
-    send_digest(ranked)
+
+    # Drop already-sent scored items before summarizing to avoid wasting API calls.
+    seen = load_seen()
+    new_ranked = [r for r in ranked if r.score == 0 or r.item.url not in seen]
+    skipped = len(ranked) - len(new_ranked)
+    if skipped:
+        print(f"Skipping {skipped} already-sent item(s).")
+
+    summarize(new_ranked)
+    send_digest(new_ranked)
+
+    # Persist the URLs we just sent so they're skipped on the next run.
+    mark_seen([r.item.url for r in new_ranked if r.score > 0])
