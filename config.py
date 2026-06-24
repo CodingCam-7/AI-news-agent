@@ -1,7 +1,7 @@
 DIGEST_RECIPIENTS = [
     "owner@example.com",
+    "recipient1@example.com",
     # "brother@example.com",
-    # "dad@example.com",
 ]
 
 RSS_FEEDS = [
