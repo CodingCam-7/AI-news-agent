@@ -12,6 +12,7 @@ Required environment variables:
   FIREBASE_CREDENTIALS — service-account JSON string (optional; enables dedup)
 """
 
+import html
 import logging
 import os
 import smtplib
@@ -19,6 +20,7 @@ import sys
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from urllib.parse import urlparse
 
 from config import DIGEST_RECIPIENTS
 from fetcher import fetch_all
@@ -30,6 +32,16 @@ logger = logging.getLogger(__name__)
 
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
+
+
+def _safe_url(url: str) -> str:
+    """Allow only http/https URLs — anything else is replaced with a safe fallback."""
+    try:
+        if urlparse(url).scheme in ("http", "https"):
+            return url
+    except Exception:
+        pass
+    return "#"
 
 
 def _plain_body(items: list[RankedItem], date_str: str) -> str:
@@ -57,14 +69,18 @@ def _html_body(items: list[RankedItem], date_str: str) -> str:
     item_blocks = []
     for r in items:
         pub = r.item.published.strftime("%Y-%m-%d") if r.item.published else "no date"
-        topics = ", ".join(r.matched_topics)
-        summary_html = f'<p style="margin:8px 0 0;font-size:15px;line-height:1.65;color:#333;">{r.summary}</p>' if r.summary else ""
+        topics = html.escape(", ".join(r.matched_topics))
+        title = html.escape(r.item.title)
+        source = html.escape(r.item.source)
+        summary = html.escape(r.summary)
+        url = _safe_url(r.item.url)
+        summary_html = f'<p style="margin:8px 0 0;font-size:15px;line-height:1.65;color:#333;">{summary}</p>' if summary else ""
         item_blocks.append(f"""
     <div style="margin-bottom:28px;padding-bottom:28px;border-bottom:1px solid #e0e0e0;">
       <h2 style="margin:0 0 4px;font-size:16px;font-weight:600;">
-        <a href="{r.item.url}" style="color:#1a0dab;text-decoration:none;">{r.item.title}</a>
+        <a href="{url}" style="color:#1a0dab;text-decoration:none;">{title}</a>
       </h2>
-      <p style="margin:0;font-size:12px;color:#777;">{r.item.source}&nbsp;&middot;&nbsp;{pub}&nbsp;&middot;&nbsp;{topics}</p>
+      <p style="margin:0;font-size:12px;color:#777;">{source}&nbsp;&middot;&nbsp;{pub}&nbsp;&middot;&nbsp;{topics}</p>
       {summary_html}
     </div>""")
 
