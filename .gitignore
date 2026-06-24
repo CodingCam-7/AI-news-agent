@@ -26,5 +26,8 @@ ENV/
 # macOS
 .DS_Store
 
+# Firebase local dev credentials (never commit — use FIREBASE_CREDENTIALS env var in CI)
+firebase-credentials.json
+
 # Logs
 *.log
