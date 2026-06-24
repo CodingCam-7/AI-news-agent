@@ -14,11 +14,22 @@ pip install -r requirements.txt
 # Run fetch-only report
 python fetcher.py
 
-# Run ranked report (fetches + scores in one shot)
+# Run ranked report (fetch + score)
 python ranker.py
+
+# Run full pipeline (fetch + rank + summarize via Claude API)
+# Requires ANTHROPIC_API_KEY set in environment or PyCharm run config
+python summarizer.py
+
+# Run full pipeline + send email digest
+# Requires ANTHROPIC_API_KEY, GMAIL_USER, GMAIL_APP_PASSWORD
+python emailer.py
 ```
 
-In PyCharm, open either file and press ▶ — no run configuration needed.
+In PyCharm, open any file and press ▶. For `summarizer.py` and `emailer.py`, add env vars under Run > Edit Configurations > Environment variables:
+- `ANTHROPIC_API_KEY` — Claude API key
+- `GMAIL_USER` — Gmail address used as sender
+- `GMAIL_APP_PASSWORD` — 16-char App Password from myaccount.google.com/apppasswords (not your Google account password)
 
 ## Architecture
 
@@ -26,8 +37,8 @@ This is a pipeline project being built incrementally. Each step is planned as it
 
 1. **Fetch** (`fetcher.py`) — done. Pulls `NewsItem` objects from RSS feeds and Hacker News.
 2. **Rank** (`ranker.py`) — done. Scores items against `TOPICS`; wraps each in `RankedItem(item, score, matched_topics)`.
-3. **Summarize** — LLM-generated digest snippets.
-4. **Email** — send formatted digest.
+3. **Summarize** (`summarizer.py`) — done. Calls Claude Haiku for 2-3 sentence summaries; populates `RankedItem.summary`.
+4. **Email** (`emailer.py`) — done. Formats digest as HTML+plain-text and sends via Gmail SMTP.
 5. **State / scheduling** — Firebase for dedup across runs; GitHub Actions cron every 2 days.
 
 `fetcher.py` owns the `NewsItem` dataclass and all fetch logic. `ranker.py` owns `RankedItem` and scoring; it imports `fetch_all()` directly and can be run standalone. `config.py` holds the shared configuration (`RSS_FEEDS`, `TOPICS`, `TOPIC_ALIASES`) imported by all steps.
