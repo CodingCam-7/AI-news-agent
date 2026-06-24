@@ -1,4 +1,8 @@
-DIGEST_RECIPIENT = "owner@example.com"
+DIGEST_RECIPIENTS = [
+    "owner@example.com",
+    # "brother@example.com",
+    # "dad@example.com",
+]
 
 RSS_FEEDS = [
     ("TechCrunch AI",  "https://techcrunch.com/category/artificial-intelligence/feed/"),

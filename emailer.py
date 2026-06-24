@@ -20,7 +20,7 @@ from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-from config import DIGEST_RECIPIENT
+from config import DIGEST_RECIPIENTS
 from fetcher import fetch_all
 from ranker import RankedItem, rank
 from state import load_seen, mark_seen
@@ -106,7 +106,7 @@ def send_digest(ranked: list[RankedItem]) -> None:
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = gmail_user
-    msg["To"] = DIGEST_RECIPIENT
+    msg["To"] = ", ".join(DIGEST_RECIPIENTS)
     msg.attach(MIMEText(_plain_body(scored, date_str), "plain"))
     msg.attach(MIMEText(_html_body(scored, date_str), "html"))
 
@@ -114,9 +114,9 @@ def send_digest(ranked: list[RankedItem]) -> None:
         smtp.ehlo()
         smtp.starttls()
         smtp.login(gmail_user, gmail_password)
-        smtp.sendmail(gmail_user, DIGEST_RECIPIENT, msg.as_string())
+        smtp.sendmail(gmail_user, DIGEST_RECIPIENTS, msg.as_string())
 
-    print(f"Digest sent to {DIGEST_RECIPIENT} ({len(scored)} item(s)).")
+    print(f"Digest sent to {', '.join(DIGEST_RECIPIENTS)} ({len(scored)} item(s)).")
 
 
 # ── entry point ───────────────────────────────────────────────────────────────
