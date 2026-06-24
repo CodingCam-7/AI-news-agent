@@ -228,11 +228,17 @@ if __name__ == "__main__":
     ranked = rank(raw)
 
     # Filter already-sent items before summarizing to avoid wasting API calls.
-    seen = load_seen()
-    new_ranked = [r for r in ranked if r.score == 0 or r.item.url not in seen]
-    skipped = len(ranked) - len(new_ranked)
-    if skipped:
-        print(f"Skipping {skipped} already-sent item(s).")
+    # Set FORCE_SEND=true to bypass dedup (useful for testing).
+    force_send = os.environ.get("FORCE_SEND", "").lower() in ("1", "true", "yes")
+    if force_send:
+        print("FORCE_SEND enabled — bypassing dedup.")
+        new_ranked = ranked
+    else:
+        seen = load_seen()
+        new_ranked = [r for r in ranked if r.score == 0 or r.item.url not in seen]
+        skipped = len(ranked) - len(new_ranked)
+        if skipped:
+            print(f"Skipping {skipped} already-sent item(s).")
 
     summarize(new_ranked)
     send_digest(new_ranked)
