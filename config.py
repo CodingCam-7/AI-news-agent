@@ -1,3 +1,5 @@
+DIGEST_RECIPIENT = "cjpentz777@gmail.com"
+
 RSS_FEEDS = [
     ("TechCrunch AI",  "https://techcrunch.com/category/artificial-intelligence/feed/"),
     ("The Verge AI",   "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml"),

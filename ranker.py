@@ -17,6 +17,7 @@ class RankedItem:
     item: NewsItem
     score: float
     matched_topics: list[str] = field(default_factory=list)
+    summary: str = ""  # populated by summarizer.py
 
 
 def _phrases_for(topic: str) -> list[str]:
