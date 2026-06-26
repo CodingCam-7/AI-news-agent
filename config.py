@@ -1,20 +1,20 @@
-RECIPIENTS = [
-    {
-        "email": "cjpentz777@gmail.com",
-        "name": "Cameron",
-        "topics": ["large language models", "AI agents", "AI tooling", "AI policy", "AI in hospitality and wine"],
-    },
-    {
-        "email": "djpentz@gmail.com",
-        "name": "Paps",
-        "topics": ["large language models", "AI agents", "AI tooling", "AI policy", "AI in hospitality and wine"],
-    },
-    {
-        "email": "mjpentz21@gmail.com",
-        "name": "MJ",
-        "topics": ["large language models", "AI agents", "AI tooling", "AI policy", "AI in hospitality and wine"],
-    },
-]
+import json
+import os as _os
+
+def _load_recipients() -> list[dict]:
+    """Load recipients from RECIPIENTS_JSON env var (CI) or recipients.json file (local dev)."""
+    env_json = _os.environ.get("RECIPIENTS_JSON")
+    if env_json:
+        return json.loads(env_json)
+    local_path = _os.path.join(_os.path.dirname(__file__), "recipients.json")
+    if _os.path.exists(local_path):
+        with open(local_path) as f:
+            return json.load(f)
+    raise RuntimeError(
+        "No recipients configured. Set the RECIPIENTS_JSON env var or create a recipients.json file."
+    )
+
+RECIPIENTS: list[dict] = _load_recipients()
 
 RSS_FEEDS = [
     ("TechCrunch AI",      "https://techcrunch.com/category/artificial-intelligence/feed/"),
