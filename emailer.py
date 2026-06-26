@@ -72,7 +72,7 @@ def _topic_section_html(topic: str, items: list[RankedItem]) -> str:
         source = html.escape(r.item.source)
         title = html.escape(r.item.title)
         summary = html.escape(r.summary) if r.summary else ""
-        url = _safe_url(r.item.url)
+        url = html.escape(_safe_url(r.item.url))
         summary_block = f"""
             <tr><td style="padding:0 20px 14px;">
               <p style="margin:0;font-size:14px;line-height:1.7;color:#333;">{summary}</p>
@@ -145,7 +145,7 @@ def _html_body(items: list[RankedItem], recipient: dict, date_str: str) -> str:
       <tr><td style="background:#dcfce7;border-top:2px solid #000;
                      padding:16px 28px;text-align:center;">
         <p style="margin:0;font-size:11px;color:#166534;">
-          AI News Agent &nbsp;&middot;&nbsp; Delivered every 2 days &nbsp;&middot;&nbsp; {date_str}
+          AI News Agent &nbsp;&middot;&nbsp; Delivered every 3 days &nbsp;&middot;&nbsp; {date_str}
         </p>
       </td></tr>
 
