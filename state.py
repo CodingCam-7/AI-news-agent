@@ -53,7 +53,7 @@ def _db():
 
 
 def _doc_id(url: str) -> str:
-    return hashlib.sha1(url.encode()).hexdigest()
+    return hashlib.sha256(url.encode()).hexdigest()
 
 
 def load_seen() -> set[str]:

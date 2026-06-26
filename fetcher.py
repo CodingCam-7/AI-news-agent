@@ -144,7 +144,8 @@ def fetch_hackernews() -> list[NewsItem]:
     for hit in data.get("hits", []):
         # The story URL is in 'url'; for Ask HN / self-posts it may be None,
         # so we fall back to the HN thread link.
-        story_url = hit.get("url") or f"https://news.ycombinator.com/item?id={hit.get('objectID', '')}"
+        oid = hit.get("objectID", "")
+        story_url = hit.get("url") or f"https://news.ycombinator.com/item?id={int(oid)}"
 
         # created_at_i is a Unix timestamp integer.
         ts = hit.get("created_at_i")
@@ -155,7 +156,7 @@ def fetch_hackernews() -> list[NewsItem]:
             url=story_url,
             source="Hacker News",
             published=pub,
-            snippet=hit.get("story_text") or "",   # self-posts only; empty for links
+            snippet=(hit.get("story_text") or "")[:200],
         ))
 
     return items
