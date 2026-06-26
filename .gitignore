@@ -29,5 +29,8 @@ ENV/
 # Firebase local dev credentials (never commit — use FIREBASE_CREDENTIALS env var in CI)
 firebase-credentials.json
 
+# Recipient list (never commit — use RECIPIENTS_JSON env var in CI)
+recipients.json
+
 # Logs
 *.log
