@@ -25,7 +25,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Items older than this are ignored.
-LOOKBACK_DAYS = 5
+LOOKBACK_DAYS = 7
 
 
 # ── data model ───────────────────────────────────────────────────────────────

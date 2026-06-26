@@ -9,15 +9,25 @@ RECIPIENTS = [
         "name": "Paps",
         "topics": ["large language models", "AI agents", "AI tooling", "AI policy", "AI in hospitality and wine"],
     },
-    # {"email": "brother@example.com", "name": "Brother", "topics": [...]},
+    {
+        "email": "mjpentz21@gmail.com",
+        "name": "MJ",
+        "topics": ["large language models", "AI agents", "AI tooling", "AI policy", "AI in hospitality and wine"],
+    },
 ]
 
 RSS_FEEDS = [
-    ("TechCrunch AI",  "https://techcrunch.com/category/artificial-intelligence/feed/"),
-    ("The Verge AI",   "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml"),
-    ("Hugging Face",   "https://huggingface.co/blog/feed.xml"),
-    ("OpenAI",         "https://openai.com/news/rss.xml"),
-    ("VentureBeat AI", "https://venturebeat.com/category/ai/feed/"),
+    ("TechCrunch AI",      "https://techcrunch.com/category/artificial-intelligence/feed/"),
+    ("The Verge AI",       "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml"),
+    ("Hugging Face",       "https://huggingface.co/blog/feed.xml"),
+    ("OpenAI",             "https://openai.com/news/rss.xml"),
+    ("VentureBeat AI",     "https://venturebeat.com/category/ai/feed/"),
+    ("MIT Tech Review",    "https://www.technologyreview.com/feed/"),
+    ("Ars Technica",       "https://feeds.arstechnica.com/arstechnica/technology-lab"),
+    ("Google AI Blog",     "https://blog.google/innovation-and-ai/technology/ai/rss/"),
+    ("DeepMind",           "https://deepmind.google/blog/rss.xml"),
+    ("IEEE Spectrum",      "https://spectrum.ieee.org/feeds/feed.rss"),
+    ("Wired",              "https://www.wired.com/feed/rss"),
 ]
 
 # Primary topic labels — used as display names in the digest.
