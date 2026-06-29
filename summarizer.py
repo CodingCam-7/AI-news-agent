@@ -26,11 +26,23 @@ SUMMARY_MODEL = "claude-haiku-4-5"
 # Stable system prompt, cached across all items in a single run.
 SYSTEM_PROMPT = (
     "You are a concise AI news digest writer. "
-    "Given an article's title, source, and excerpt, write a 2-3 sentence summary that:\n"
+    "Given an article's title, source, and optionally an excerpt, write a 2-3 sentence summary that:\n"
     "- Captures the key development or insight\n"
     "- Explains why it matters for someone tracking AI trends\n"
     "- Uses plain, direct prose (no bullet points, no hype)\n\n"
+    "If no excerpt is available, write a brief summary based on the title alone — never ask for more information or refuse.\n\n"
     "Respond with only the summary text — no preamble, no labels."
+)
+
+# Phrases that indicate Claude refused to summarize instead of producing real content.
+_REFUSAL_PHRASES = (
+    "i can't provide",
+    "i cannot provide",
+    "i don't have enough",
+    "without the article",
+    "please share",
+    "i would need",
+    "the article excerpt is empty",
 )
 
 
@@ -74,20 +86,25 @@ def _summarize_one(client: anthropic.Anthropic, r: RankedItem) -> str:
         ],
         messages=[{"role": "user", "content": user_content}],
     )
-    return response.content[0].text.strip()
+    text = response.content[0].text.strip()
+    if any(phrase in text.lower() for phrase in _REFUSAL_PHRASES):
+        raise ValueError(f"Model returned a refusal instead of a summary: {text[:80]!r}")
+    return text
 
 
-def summarize(ranked: list[RankedItem], min_score: float = 1.0) -> list[RankedItem]:
+def summarize(ranked: list[RankedItem], min_score: float = 1.0) -> tuple[list[RankedItem], list[str]]:
     """
     Populate the `summary` field on every item whose score >= min_score.
     Items below the threshold are left with summary = "".
-    Returns the same list (mutated in place) for chaining.
+    Returns (ranked, failures) where failures is a list of "[Source] Title" strings
+    for every item that could not be summarized.
     """
     to_summarize = [r for r in ranked if r.score >= min_score]
+    failures: list[str] = []
 
     if not to_summarize:
         logger.warning("No items met the score threshold — nothing to summarize.")
-        return ranked
+        return ranked, failures
 
     client = _make_client()
     print(f"Summarizing {len(to_summarize)} matched item(s) via Claude {SUMMARY_MODEL}...\n")
@@ -97,10 +114,10 @@ def summarize(ranked: list[RankedItem], min_score: float = 1.0) -> list[RankedIt
             r.summary = _summarize_one(client, r)
         except Exception as exc:
             logger.warning("Summary failed for '%s': %s", r.item.title, exc)
-            r.summary = r.item.snippet  # fall back to the raw snippet
+            r.summary = r.item.snippet
+            failures.append(f"[{r.item.source}] {r.item.title}")
 
-
-    return ranked
+    return ranked, failures
 
 
 # ── entry point ───────────────────────────────────────────────────────────────
@@ -110,7 +127,12 @@ if __name__ == "__main__":
 
     raw = fetch_all()
     ranked = rank(raw)
-    summarize(ranked)
+    ranked, failures = summarize(ranked)
+
+    if failures:
+        print(f"\nWARNING: {len(failures)} summary failure(s):")
+        for f in failures:
+            print(f"  {f}")
 
     scored = [r for r in ranked if r.score > 0]
 

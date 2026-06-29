@@ -174,6 +174,44 @@ def _plain_body(items: list[RankedItem], recipient: dict, date_str: str) -> str:
     return "\n".join(lines)
 
 
+def _send_alert(failures: list[str]) -> None:
+    """Email Cameron when summarization failures are detected. Digest is held until resolved."""
+    gmail_user = os.environ.get("GMAIL_USER")
+    gmail_password = os.environ.get("GMAIL_APP_PASSWORD")
+    # Default to the sender address so no extra secret is needed in most setups.
+    alert_email = os.environ.get("ALERT_EMAIL") or gmail_user
+    if not gmail_user or not gmail_password or not alert_email:
+        logger.error("Cannot send failure alert — GMAIL_USER / GMAIL_APP_PASSWORD not set.")
+        return
+
+    date_str = datetime.now().strftime("%B %d, %Y")
+    n = len(failures)
+    subject = f"[ALERT] AI News Digest — {n} summarization failure(s) on {date_str}"
+    failure_lines = "\n".join(f"  - {f}" for f in failures)
+    plain = (
+        f"AI News Digest Alert — {date_str}\n"
+        f"{'=' * 60}\n\n"
+        f"{n} article(s) failed summarization. The digest was NOT sent to recipients.\n\n"
+        f"Failed articles:\n{failure_lines}\n\n"
+        f"To investigate: check the GitHub Actions logs for WARNING messages.\n"
+        f"Re-run the workflow with FORCE_SEND=true once the issue is resolved.\n"
+    )
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = gmail_user
+    msg["To"] = alert_email
+    msg.attach(MIMEText(plain, "plain"))
+
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
+        smtp.ehlo()
+        smtp.starttls()
+        smtp.login(gmail_user, gmail_password)
+        smtp.sendmail(gmail_user, alert_email, msg.as_string())
+
+    print(f"[ALERT] Failure alert sent to {alert_email}. Digest held — re-run with FORCE_SEND=true once resolved.")
+
+
 def send_digest(ranked: list[RankedItem]) -> None:
     """Send a personalised newsletter digest to each recipient in config.RECIPIENTS."""
     gmail_user = os.environ.get("GMAIL_USER")
@@ -240,7 +278,11 @@ if __name__ == "__main__":
         if skipped:
             print(f"Skipping {skipped} already-sent item(s).")
 
-    summarize(new_ranked)
+    new_ranked, failures = summarize(new_ranked)
+    if failures:
+        _send_alert(failures)
+        sys.exit(1)
+
     send_digest(new_ranked)
 
     # Persist sent URLs so they're skipped on the next run.
