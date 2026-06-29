@@ -22,10 +22,9 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from urllib.parse import urlparse
 
-from config import RECIPIENTS
 from fetcher import fetch_all
 from ranker import RankedItem, rank
-from state import load_seen, mark_seen
+from state import load_recipients, load_seen, mark_seen
 from summarizer import summarize
 
 logger = logging.getLogger(__name__)
@@ -247,12 +246,14 @@ def send_digest(ranked: list[RankedItem]) -> None:
         logger.warning("No matched items — skipping email send.")
         return
 
+    recipients = load_recipients()
+
     with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
         smtp.ehlo()
         smtp.starttls()
         smtp.login(gmail_user, gmail_password)
 
-        for recipient in RECIPIENTS:
+        for recipient in recipients:
             recipient_items = [
                 r for r in scored
                 if any(t in r.matched_topics for t in recipient["topics"])
