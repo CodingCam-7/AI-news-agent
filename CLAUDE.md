@@ -60,3 +60,5 @@ This is a pipeline project being built incrementally. Each step is planned as it
 **Firebase deduplication:** `state.py` resolves credentials in this order: (1) `FIREBASE_CREDENTIALS` env var (JSON string — used in CI), (2) `firebase-credentials.json` file in the project root (gitignored, used locally). If neither is present, dedup is silently disabled and all matched items are sent. The Firestore collection is `seen_articles`; document IDs are SHA-1 hashes of the article URL.
 
 **GitHub Actions secrets required:** `ANTHROPIC_API_KEY`, `GMAIL_USER`, `GMAIL_APP_PASSWORD`, `FIREBASE_CREDENTIALS` (the full service-account JSON as a single-line string). Set at Settings → Secrets and variables → Actions.
+
+**Summarization failure alerting:** If any article fails summarization, `emailer.py` sends an alert email and exits with code 1 — the digest is held and not sent to recipients. The alert goes to `ALERT_EMAIL` env var if set, otherwise falls back to `GMAIL_USER`. No extra secret is needed unless you want alerts routed to a different address. Re-run with `FORCE_SEND=true` once the issue is resolved.
