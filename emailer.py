@@ -35,11 +35,27 @@ SMTP_PORT = 587
 
 # Background color per topic — all light enough to read on white, black-outlined in the template.
 TOPIC_COLORS: dict[str, str] = {
+    # Models & Research
     "large language models":      "#bbf7d0",  # light green
+    "multimodal AI":              "#fde68a",  # light yellow
+    "AI safety & alignment":      "#fecaca",  # light red
+    "open source AI":             "#d9f99d",  # light lime
+    # Hardware & Infrastructure
+    "AI hardware & chips":        "#e9d5ff",  # light purple
+    "AI cloud & infrastructure":  "#fed7aa",  # light orange
+    "AI energy & costs":          "#a7f3d0",  # light teal
+    # Applications
     "AI agents":                  "#bae6fd",  # light blue
     "AI tooling":                 "#a5f3fc",  # cyan
-    "AI policy":                  "#c7d2fe",  # soft indigo
+    "AI in finance":              "#fef9c3",  # light yellow
+    "AI in healthcare":           "#fbcfe8",  # light pink
+    "AI in creative industries":  "#f5d0fe",  # light violet
+    "robotics & physical AI":     "#e2e8f0",  # light slate
     "AI in hospitality and wine": "#d1fae5",  # pale green
+    # Business & Society
+    "AI startups & funding":      "#fef3c7",  # light amber
+    "enterprise AI":              "#e0e7ff",  # light indigo
+    "AI policy":                  "#c7d2fe",  # soft indigo
 }
 
 
