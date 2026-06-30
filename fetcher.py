@@ -145,7 +145,12 @@ def fetch_hackernews() -> list[NewsItem]:
         # The story URL is in 'url'; for Ask HN / self-posts it may be None,
         # so we fall back to the HN thread link.
         oid = hit.get("objectID", "")
-        story_url = hit.get("url") or f"https://news.ycombinator.com/item?id={int(oid)}"
+        try:
+            oid_int = int(oid)
+        except (TypeError, ValueError):
+            logger.warning("Hacker News hit has invalid objectID %r — skipping.", oid)
+            continue
+        story_url = hit.get("url") or f"https://news.ycombinator.com/item?id={oid_int}"
 
         # created_at_i is a Unix timestamp integer.
         ts = hit.get("created_at_i")
