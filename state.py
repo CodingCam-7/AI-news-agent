@@ -14,12 +14,14 @@ import hashlib
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
 COLLECTION = "seen_articles"
 RECIPIENTS_COLLECTION = "recipients"
+_EMAIL_RE = re.compile(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$')
 
 _db_client = None
 
@@ -41,8 +43,13 @@ def _db():
         if cred_json:
             cred = credentials.Certificate(json.loads(cred_json))
         else:
-            local_path = os.path.join(os.path.dirname(__file__), "firebase-credentials.json")
-            if not os.path.exists(local_path):
+            preferred = os.path.expanduser("~/.config/ai-news-agent/firebase-credentials.json")
+            fallback  = os.path.join(os.path.dirname(__file__), "firebase-credentials.json")
+            if os.path.exists(preferred):
+                local_path = preferred
+            elif os.path.exists(fallback):
+                local_path = fallback
+            else:
                 logger.warning("No Firebase credentials found — deduplication disabled.")
                 return None
             cred = credentials.Certificate(local_path)
@@ -107,6 +114,8 @@ def save_recipient(recipient: dict) -> None:
     email = recipient.get("email", "").strip().lower()
     if not email:
         raise ValueError("Recipient must have an email address.")
+    if not _EMAIL_RE.match(email):
+        raise ValueError(f"Invalid email address: {email!r}")
     doc_id = hashlib.sha256(email.encode()).hexdigest()
     data = {**recipient, "email": email, "active": recipient.get("active", True)}
     db.collection(RECIPIENTS_COLLECTION).document(doc_id).set(data, merge=True)

@@ -12,10 +12,13 @@ The service account must have Viewer access to the Google Sheet.
 import json
 import logging
 import os
+import re
 import sys
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 logger = logging.getLogger(__name__)
+
+_EMAIL_RE = re.compile(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$')
 
 SHEET_ID = os.environ.get(
     "GOOGLE_SHEET_ID",
@@ -73,11 +76,13 @@ def _sheets_client():
     if cred_json:
         info = json.loads(cred_json)
     else:
-        local_path = os.path.join(os.path.dirname(__file__), "firebase-credentials.json")
+        preferred = os.path.expanduser("~/.config/ai-news-agent/firebase-credentials.json")
+        fallback  = os.path.join(os.path.dirname(__file__), "firebase-credentials.json")
+        local_path = preferred if os.path.exists(preferred) else fallback
         if not os.path.exists(local_path):
             logger.error(
                 "No credentials found — set FIREBASE_CREDENTIALS env var "
-                "or provide firebase-credentials.json."
+                "or place firebase-credentials.json at ~/.config/ai-news-agent/."
             )
             sys.exit(1)
         with open(local_path) as f:
@@ -148,8 +153,12 @@ def sync() -> int:
     latest: dict[str, dict] = {}
     for row in records:
         email = row.get(COL_EMAIL, "").strip().lower()
-        if email:
-            latest[email] = row
+        if not email:
+            continue
+        if not _EMAIL_RE.match(email):
+            logger.warning("Skipping response with invalid email address: %r", email)
+            continue
+        latest[email] = row
 
     synced = 0
     for email, row in latest.items():
