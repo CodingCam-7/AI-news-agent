@@ -166,6 +166,12 @@ def sync() -> int:
         topics = _parse_topics(row)
         priority = _parse_priority(row)
 
+        # A priority pick implies interest — add it to topics if not already selected.
+        for p in priority:
+            if p not in topics:
+                topics.append(p)
+                logger.info("Added priority topic %r to interests for %s.", p, email)
+
         if not topics:
             logger.warning("No topics selected for %s — skipping.", email)
             continue
