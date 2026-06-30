@@ -68,6 +68,15 @@ def _safe_url(url: str) -> str:
     return "#"
 
 
+def _ordered_topics(recipient: dict) -> list[str]:
+    """Return recipient's topics with priority topics moved to the front."""
+    topics: list[str] = recipient["topics"]
+    priority: list[str] = recipient.get("priority", [])
+    priority_set = set(priority)
+    topic_set = set(topics)
+    return [t for t in priority if t in topic_set] + [t for t in topics if t not in priority_set]
+
+
 def _group_by_topic(items: list[RankedItem], topics: list[str]) -> dict[str, list[RankedItem]]:
     """Assign each item to the first of the recipient's topics it matched."""
     groups: dict[str, list[RankedItem]] = {t: [] for t in topics}
@@ -127,7 +136,7 @@ def _topic_section_html(topic: str, items: list[RankedItem]) -> str:
 
 def _html_body(items: list[RankedItem], recipient: dict, date_str: str) -> str:
     name = html.escape(recipient.get("name", ""))
-    groups = _group_by_topic(items, recipient["topics"])
+    groups = _group_by_topic(items, _ordered_topics(recipient))
     sections = "".join(_topic_section_html(t, v) for t, v in groups.items())
     n = len(items)
     article_word = "article" if n == 1 else "articles"
@@ -178,7 +187,7 @@ def _plain_body(items: list[RankedItem], recipient: dict, date_str: str) -> str:
         f"Hi {name} — {len(items)} article(s) matched your topics",
         "=" * 60,
     ]
-    for topic, topic_items in _group_by_topic(items, recipient["topics"]).items():
+    for topic, topic_items in _group_by_topic(items, _ordered_topics(recipient)).items():
         lines += ["", f"── {topic.upper()} ──"]
         for r in topic_items:
             pub = r.item.published.strftime("%Y-%m-%d") if r.item.published else "no date"
