@@ -13,7 +13,9 @@ import json
 import logging
 import os
 import re
+import smtplib
 import sys
+from email.mime.text import MIMEText
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 logger = logging.getLogger(__name__)
@@ -60,6 +62,11 @@ COL_PRIORITY = [
     "My #2 most important topic is...",
     "My #3 most important topic is...",
 ]
+COL_ADDITIONAL = "Additional topic/s"
+
+OWNER_EMAIL = "cjpentz777@gmail.com"
+SMTP_HOST   = "smtp.gmail.com"
+SMTP_PORT   = 587
 
 
 def _sheets_client():
@@ -128,6 +135,36 @@ def _parse_priority(row: dict) -> list[str]:
     return priority
 
 
+def _notify_additional_topic(respondent_name: str, respondent_email: str, text: str) -> None:
+    """Email the owner when a respondent suggests an additional topic."""
+    gmail_user     = os.environ.get("GMAIL_USER")
+    gmail_password = os.environ.get("GMAIL_APP_PASSWORD")
+    if not gmail_user or not gmail_password:
+        logger.warning("GMAIL_USER / GMAIL_APP_PASSWORD not set — cannot send additional-topic notification.")
+        return
+
+    subject = f"New topic suggestion from {respondent_name}"
+    body = (
+        f"{respondent_name} ({respondent_email}) suggested an additional topic:\n\n"
+        f"{text}\n\n"
+        "Reply to this email or open Claude Code to discuss adding it."
+    )
+    msg = MIMEText(body, "plain")
+    msg["Subject"] = subject
+    msg["From"]    = gmail_user
+    msg["To"]      = OWNER_EMAIL
+
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.login(gmail_user, gmail_password)
+            smtp.sendmail(gmail_user, OWNER_EMAIL, msg.as_string())
+        logger.info("Sent additional-topic notification for %s.", respondent_email)
+    except Exception as exc:
+        logger.warning("Failed to send additional-topic notification: %s", exc)
+
+
 def sync() -> int:
     """
     Pull all form responses and upsert each into Firestore.
@@ -187,6 +224,11 @@ def sync() -> int:
             "Synced: %s — %d topic(s), priority: %s",
             name, len(topics), priority or "none set",
         )
+
+        additional = row.get(COL_ADDITIONAL, "").strip()
+        if additional:
+            _notify_additional_topic(name, email, additional)
+
         synced += 1
 
     return synced
