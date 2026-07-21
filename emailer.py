@@ -25,7 +25,7 @@ from urllib.parse import urlparse
 from fetcher import fetch_all
 from ranker import RankedItem, rank
 from state import load_recipients, load_seen, mark_seen
-from summarizer import summarize
+from summarizer import overview, summarize
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +134,43 @@ def _topic_section_html(topic: str, items: list[RankedItem]) -> str:
         <tr><td style="padding:20px 0 4px;">{cards}</td></tr>"""
 
 
-def _html_body(items: list[RankedItem], recipient: dict, date_str: str) -> str:
+def _brief_html(brief: tuple[str, list[str]] | None) -> str:
+    """Render the opening brief. Returns an empty string when no brief was generated."""
+    if not brief:
+        return ""
+    hook, bullets = brief
+    items = "".join(
+        f"""<tr>
+              <td valign="top" style="padding:0 8px 6px 0;font-size:14px;line-height:1.6;color:#000;">&bull;</td>
+              <td style="padding:0 0 6px;font-size:14px;line-height:1.6;color:#333;">{html.escape(b)}</td>
+            </tr>"""
+        for b in bullets
+    )
+    hook_block = f"""
+          <p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#000;font-weight:700;">
+            {html.escape(hook)}
+          </p>""" if hook else ""
+
+    return f"""
+        <tr><td style="padding:24px 24px 4px;">
+          <table width="100%" cellpadding="0" cellspacing="0"
+                 style="border:2px solid #000;background:#dcfce7;">
+            <tr><td style="padding:16px 20px 6px;">
+              <p style="margin:0 0 10px;font-size:10px;font-weight:800;letter-spacing:2px;
+                        color:#166534;text-transform:uppercase;">Today's Brief</p>
+              {hook_block}
+              <table width="100%" cellpadding="0" cellspacing="0">{items}</table>
+            </td></tr>
+          </table>
+        </td></tr>"""
+
+
+def _html_body(
+    items: list[RankedItem],
+    recipient: dict,
+    date_str: str,
+    brief: tuple[str, list[str]] | None = None,
+) -> str:
     name = html.escape(recipient.get("name", ""))
     groups = _group_by_topic(items, _ordered_topics(recipient))
     sections = "".join(_topic_section_html(t, v) for t, v in groups.items())
@@ -162,6 +198,9 @@ def _html_body(items: list[RankedItem], recipient: dict, date_str: str) -> str:
         </p>
       </td></tr>
 
+      <!-- Opening brief -->
+      {_brief_html(brief)}
+
       <!-- Article sections grouped by topic -->
       {sections}
 
@@ -180,13 +219,25 @@ def _html_body(items: list[RankedItem], recipient: dict, date_str: str) -> str:
 </html>"""
 
 
-def _plain_body(items: list[RankedItem], recipient: dict, date_str: str) -> str:
+def _plain_body(
+    items: list[RankedItem],
+    recipient: dict,
+    date_str: str,
+    brief: tuple[str, list[str]] | None = None,
+) -> str:
     name = recipient.get("name", "")
     lines = [
         f"AI News Digest — {date_str}",
         f"Hi {name} — {len(items)} article(s) matched your topics",
         "=" * 60,
     ]
+    if brief:
+        hook, bullets = brief
+        lines += ["", "TODAY'S BRIEF"]
+        if hook:
+            lines += ["", hook]
+        lines += [""] + [f"  - {b}" for b in bullets]
+        lines += ["", "=" * 60]
     for topic, topic_items in _group_by_topic(items, _ordered_topics(recipient)).items():
         lines += ["", f"── {topic.upper()} ──"]
         for r in topic_items:
@@ -237,10 +288,21 @@ def _send_alert(failures: list[str]) -> None:
 
 
 def send_digest(ranked: list[RankedItem]) -> None:
-    """Send a personalised newsletter digest to each recipient in config.RECIPIENTS."""
+    """
+    Send a personalised newsletter digest to each recipient in Firestore.
+
+    Two safeguards for testing, both read from the environment:
+      DRY_RUN=true       — build every digest and print it to the terminal; open no
+                           SMTP connection and send nothing. Needs no Gmail creds.
+      ONLY_EMAIL=<addr>  — restrict a real send to a single recipient address, so a
+                           test send cannot fan out to the whole list.
+    """
+    dry_run = os.environ.get("DRY_RUN", "").lower() in ("1", "true", "yes")
+    only_email = os.environ.get("ONLY_EMAIL", "").strip().lower()
+
     gmail_user = os.environ.get("GMAIL_USER")
     gmail_password = os.environ.get("GMAIL_APP_PASSWORD")
-    if not gmail_user or not gmail_password:
+    if not dry_run and (not gmail_user or not gmail_password):
         print(
             "Error: GMAIL_USER and GMAIL_APP_PASSWORD must be set.\n"
             "Generate an App Password at myaccount.google.com/apppasswords.",
@@ -256,28 +318,62 @@ def send_digest(ranked: list[RankedItem]) -> None:
         return
 
     recipients = load_recipients()
+    if only_email:
+        recipients = [r for r in recipients if r["email"].strip().lower() == only_email]
+        if not recipients:
+            logger.warning("ONLY_EMAIL=%s matched no active recipient — nothing to send.", only_email)
+            return
+        print(f"ONLY_EMAIL set — restricting send to {only_email} ({len(recipients)} recipient).")
+
+    # Build each recipient's article set and opening brief BEFORE opening the SMTP
+    # connection — the brief costs an API call per recipient, and holding the SMTP
+    # socket open across those calls risks the server timing the connection out.
+    outgoing: list[tuple[dict, list[RankedItem], tuple[str, list[str]] | None]] = []
+    for recipient in recipients:
+        recipient_items = [
+            r for r in scored
+            if any(t in r.matched_topics for t in recipient["topics"])
+        ]
+        if not recipient_items:
+            logger.warning("No matched items for %s — skipping.", recipient["email"])
+            continue
+
+        # The brief is a nice-to-have: on failure we drop it and send the digest anyway.
+        try:
+            brief = overview(recipient_items, recipient)
+        except Exception as exc:
+            logger.warning("Opening brief failed for %s: %s", recipient["email"], exc)
+            brief = None
+
+        outgoing.append((recipient, recipient_items, brief))
+
+    if not outgoing:
+        logger.warning("No recipients had matched items — nothing to send.")
+        return
+
+    if dry_run:
+        for recipient, recipient_items, brief in outgoing:
+            print(f"\n{'#' * 70}")
+            print(f"# DRY RUN — would send to {recipient['name']} <{recipient['email']}> "
+                  f"({len(recipient_items)} article(s))")
+            print(f"{'#' * 70}")
+            print(_plain_body(recipient_items, recipient, date_str, brief))
+        print(f"\nDRY_RUN complete — {len(outgoing)} digest(s) built, 0 sent.")
+        return
 
     with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
         smtp.ehlo()
         smtp.starttls()
         smtp.login(gmail_user, gmail_password)
 
-        for recipient in recipients:
-            recipient_items = [
-                r for r in scored
-                if any(t in r.matched_topics for t in recipient["topics"])
-            ]
-            if not recipient_items:
-                logger.warning("No matched items for %s — skipping.", recipient["email"])
-                continue
-
+        for recipient, recipient_items, brief in outgoing:
             subject = f"AI News Digest — {date_str} | {len(recipient_items)} article(s)"
             msg = MIMEMultipart("alternative")
             msg["Subject"] = subject
             msg["From"] = gmail_user
             msg["To"] = recipient["email"]
-            msg.attach(MIMEText(_plain_body(recipient_items, recipient, date_str), "plain"))
-            msg.attach(MIMEText(_html_body(recipient_items, recipient, date_str), "html"))
+            msg.attach(MIMEText(_plain_body(recipient_items, recipient, date_str, brief), "plain"))
+            msg.attach(MIMEText(_html_body(recipient_items, recipient, date_str, brief), "html"))
 
             smtp.sendmail(gmail_user, recipient["email"], msg.as_string())
             print(f"Digest sent to {recipient['name']} <{recipient['email']}> ({len(recipient_items)} article(s)).")

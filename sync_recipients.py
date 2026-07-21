@@ -48,7 +48,9 @@ FORM_TOPIC_MAP: dict[str, str] = {
     "AI laws & government rules":      "AI policy",
 }
 
-# Google Form column headers — must match the question titles in your form exactly.
+# Google Form column headers.
+# Matched by prefix, not equality — Google Sheets includes any help text the question
+# carries (e.g. "What is your email address?\n(This is the address ...)") in the header.
 COL_NAME  = "What is your first name?"
 COL_EMAIL = "What is your email address?"
 COL_TOPIC_SECTIONS = [
@@ -63,6 +65,13 @@ COL_PRIORITY = [
     "My #3 most important topic is...",
 ]
 COL_ADDITIONAL = "Additional topic/s"
+
+# Greeting names that win over whatever the form says, keyed by email.
+# The form asks for a legal first name; these are the names those people actually
+# want to be greeted by in their digest.
+NAME_OVERRIDES: dict[str, str] = {
+    "recipient1@example.com": "Paps",
+}
 
 OWNER_EMAIL = "owner@example.com"
 SMTP_HOST   = "smtp.gmail.com"
@@ -99,26 +108,60 @@ def _sheets_client():
     return gspread.authorize(creds)
 
 
+def _cell(row: dict, header: str) -> str:
+    """
+    Look up a column by header prefix.
+
+    Google Sheets folds a question's help text into the header, so the stored header
+    is often longer than the question title (e.g. the email question carries
+    "\\n(This is the address your digest will be sent to)"). Exact lookup misses those.
+    """
+    for key, value in row.items():
+        if key.startswith(header):
+            return str(value).strip()
+    return ""
+
+
+# Strips the option numbering the priority dropdowns carry, e.g. "9. Tools for..." → "Tools for...".
+_PRIORITY_PREFIX_RE = re.compile(r"^\s*\d+\.\s*")
+
+
+def _match_label(text: str) -> str | None:
+    """
+    Map one form option to its internal topic key.
+
+    Options render as "<label> (<description>)", so the label is a prefix rather than
+    the whole string. Labels are mutually non-overlapping, so longest-prefix wins.
+    """
+    for label in sorted(FORM_TOPIC_MAP, key=len, reverse=True):
+        if text.startswith(label):
+            return FORM_TOPIC_MAP[label]
+    return None
+
+
 def _parse_topics(row: dict) -> list[str]:
     """
     Pull selected topics from all four checkbox columns and map to internal keys.
-    Google Forms separates multiple checkbox selections with ', '.
+
+    Google Forms joins multiple checkbox selections with ', ' — but each option's
+    parenthetical description contains ', ' too, so the cell cannot simply be split.
+    Instead each known label is matched where it starts the cell or follows a ', '.
     """
     topics: list[str] = []
     for col in COL_TOPIC_SECTIONS:
-        cell = row.get(col, "").strip()
+        cell = _cell(row, col)
         if not cell:
             continue
-        for raw in cell.split(", "):
-            raw = raw.strip()
-            if not raw:
-                continue
-            internal = FORM_TOPIC_MAP.get(raw)
-            if internal:
-                if internal not in topics:
-                    topics.append(internal)
-            else:
-                logger.warning("Unrecognised topic in form response: %r — skipping.", raw)
+        matched = 0
+        for label, internal in FORM_TOPIC_MAP.items():
+            for m in re.finditer(re.escape(label), cell):
+                if m.start() == 0 or cell[m.start() - 2:m.start()] == ", ":
+                    matched += 1
+                    if internal not in topics:
+                        topics.append(internal)
+                    break
+        if not matched:
+            logger.warning("No recognised topics in %r column: %r", col, cell[:120])
     return topics
 
 
@@ -126,12 +169,15 @@ def _parse_priority(row: dict) -> list[str]:
     """Extract the respondent's top-3 priority topics and map to internal keys."""
     priority: list[str] = []
     for col in COL_PRIORITY:
-        raw = row.get(col, "").strip()
+        raw = _cell(row, col)
         if not raw:
             continue
-        internal = FORM_TOPIC_MAP.get(raw)
-        if internal and internal not in priority:
-            priority.append(internal)
+        internal = _match_label(_PRIORITY_PREFIX_RE.sub("", raw))
+        if internal:
+            if internal not in priority:
+                priority.append(internal)
+        else:
+            logger.warning("Unrecognised priority pick: %r — skipping.", raw)
     return priority
 
 
@@ -189,8 +235,9 @@ def sync() -> int:
     # Keep only the latest submission per email address.
     latest: dict[str, dict] = {}
     for row in records:
-        email = row.get(COL_EMAIL, "").strip().lower()
+        email = _cell(row, COL_EMAIL).lower()
         if not email:
+            logger.warning("Skipping response with no email address (row: %r).", _cell(row, COL_NAME) or "unnamed")
             continue
         if not _EMAIL_RE.match(email):
             logger.warning("Skipping response with invalid email address: %r", email)
@@ -199,7 +246,7 @@ def sync() -> int:
 
     synced = 0
     for email, row in latest.items():
-        name   = row.get(COL_NAME, "").strip() or email
+        name   = NAME_OVERRIDES.get(email) or _cell(row, COL_NAME) or email
         topics = _parse_topics(row)
         priority = _parse_priority(row)
 
@@ -225,7 +272,7 @@ def sync() -> int:
             name, len(topics), priority or "none set",
         )
 
-        additional = row.get(COL_ADDITIONAL, "").strip()
+        additional = _cell(row, COL_ADDITIONAL)
         if additional:
             _notify_additional_topic(name, email, additional)
 
