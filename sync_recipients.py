@@ -33,6 +33,7 @@ FORM_TOPIC_MAP: dict[str, str] = {
     "AI that sees, hears & creates":   "multimodal AI",
     "AI risks & safety":               "AI safety & alignment",
     "Free & open AI models":           "open source AI",
+    "What the big AI labs just shipped": "frontier lab releases",
     "The computers that power AI":     "AI hardware & chips",
     "Running AI at scale":             "AI cloud & infrastructure",
     "AI's cost & energy use":          "AI energy & costs",
@@ -46,6 +47,7 @@ FORM_TOPIC_MAP: dict[str, str] = {
     "New AI companies & investment":   "AI startups & funding",
     "How businesses are using AI":     "enterprise AI",
     "AI laws & government rules":      "AI policy",
+    "AI replacing human jobs":         "AI & jobs",
 }
 
 # Google Form column headers.

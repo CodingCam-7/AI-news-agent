@@ -34,3 +34,6 @@ recipients.json
 
 # Logs
 *.log
+
+# PyCharm / IntelliJ IDE config
+.idea/

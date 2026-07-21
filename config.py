@@ -19,6 +19,7 @@ TOPICS = [
     "multimodal AI",
     "AI safety & alignment",
     "open source AI",
+    "frontier lab releases",
     # Hardware & Infrastructure
     "AI hardware & chips",
     "AI cloud & infrastructure",
@@ -35,6 +36,7 @@ TOPICS = [
     "AI startups & funding",
     "enterprise AI",
     "AI policy",
+    "AI & jobs",
 ]
 
 # Additional search phrases checked alongside each topic.
@@ -50,6 +52,20 @@ TOPIC_ALIASES: dict[str, list[str]] = {
                                    "AI risk", "AI ethics", "responsible AI", "AI harm", "AI bias"],
     "open source AI":             ["open source", "open weights", "open weight", "open-source AI",
                                    "Llama", "Mistral", "Falcon", "Phi", "Gemma", "open model"],
+    # Tracks what the big labs actually shipped — release notes, changelogs, version bumps.
+    # NOTE: ranker.py does bare substring matching with no word boundaries, so generic verbs
+    # are unusable here ("launches" hits "relaunches", "ships" hits "relationships"). Every
+    # phrase below is either a compound lab+verb or an inherently release-specific term.
+    # Bare lab names are excluded too — they appear in nearly every AI article.
+    "frontier lab releases":      ["release notes", "changelog", "model release", "model launch",
+                                   "new model", "model update", "system card", "model card",
+                                   "frontier model", "frontier lab",
+                                   "openai release", "openai launch", "openai unveil",
+                                   "openai announce", "anthropic release", "anthropic launch",
+                                   "anthropic announce", "deepmind release", "deepmind announce",
+                                   "google release", "meta release", "xai release",
+                                   "gpt-4", "gpt-5", "gpt-6", "claude 3", "claude 4", "claude 5",
+                                   "gemini 2", "gemini 3", "grok 3", "grok 4", "llama 4"],
     "AI hardware & chips":        ["NVIDIA", "GPU", "TPU", "semiconductor", "data center", "data centre",
                                    "H100", "A100", "Blackwell", "AMD", "Intel", "custom silicon",
                                    "AI accelerator", "AI chip"],
@@ -76,4 +92,14 @@ TOPIC_ALIASES: dict[str, list[str]] = {
                                    "AI productivity", "workforce AI", "Microsoft Copilot", "Salesforce AI"],
     "AI policy":                  ["AI regulation", "AI governance", "AI law", "AI ban", "AI policy",
                                    "EU AI Act", "executive order", "AI legislation", "AI oversight"],
+    # Bare "automation" is deliberately absent — it matches "home automation", "marketing
+    # automation" and similar. Every phrase here needs explicit employment context.
+    "AI & jobs":                  ["job losses", "job cuts", "job displacement", "jobs replaced",
+                                   "replacing workers", "replace workers", "replacing humans",
+                                   "replacing human", "human workers", "job automation",
+                                   "automating jobs", "layoffs", "laid off", "job market",
+                                   "unemployment", "labor market", "labour market",
+                                   "future of work", "reskilling", "upskilling", "retraining",
+                                   "white-collar job", "workforce reduction", "headcount",
+                                   "hiring freeze", "displaced workers"],
 }

@@ -39,6 +39,7 @@ TOPIC_COLORS: dict[str, str] = {
     "multimodal AI":              "#fde68a",  # light yellow
     "AI safety & alignment":      "#fecaca",  # light red
     "open source AI":             "#d9f99d",  # light lime
+    "frontier lab releases":      "#ddd6fe",  # light periwinkle
     # Hardware & Infrastructure
     "AI hardware & chips":        "#e9d5ff",  # light purple
     "AI cloud & infrastructure":  "#fed7aa",  # light orange
@@ -55,6 +56,7 @@ TOPIC_COLORS: dict[str, str] = {
     "AI startups & funding":      "#fef3c7",  # light amber
     "enterprise AI":              "#e0e7ff",  # light indigo
     "AI policy":                  "#c7d2fe",  # soft indigo
+    "AI & jobs":                  "#fecdd3",  # light rose
 }
 
 
