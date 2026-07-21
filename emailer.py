@@ -70,9 +70,26 @@ def _safe_url(url: str) -> str:
     return "#"
 
 
+def _all_topics(recipient: dict) -> list[str]:
+    """
+    Every topic a recipient should receive: their form-selected `topics` plus any
+    person-specific `extra_topics`.
+
+    `extra_topics` is a separate field because sync_recipients.py rewrites `topics`
+    wholesale from the Google Form on every run — a topic hand-added there would be
+    wiped on the next digest. The sync never writes `extra_topics`, and Firestore's
+    merge=True leaves absent fields untouched, so extras survive.
+    """
+    topics = list(recipient.get("topics", []))
+    for t in recipient.get("extra_topics") or []:
+        if t not in topics:
+            topics.append(t)
+    return topics
+
+
 def _ordered_topics(recipient: dict) -> list[str]:
     """Return recipient's topics with priority topics moved to the front."""
-    topics: list[str] = recipient["topics"]
+    topics: list[str] = _all_topics(recipient)
     priority: list[str] = recipient.get("priority", [])
     priority_set = set(priority)
     topic_set = set(topics)
@@ -334,7 +351,7 @@ def send_digest(ranked: list[RankedItem]) -> None:
     for recipient in recipients:
         recipient_items = [
             r for r in scored
-            if any(t in r.matched_topics for t in recipient["topics"])
+            if any(t in r.matched_topics for t in _all_topics(recipient))
         ]
         if not recipient_items:
             logger.warning("No matched items for %s — skipping.", recipient["email"])

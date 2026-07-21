@@ -122,6 +122,32 @@ def save_recipient(recipient: dict) -> None:
     logger.info("Saved recipient: %s", email)
 
 
+def set_extra_topics(email: str, topics: list[str]) -> None:
+    """
+    Set a recipient's person-specific extra topics, replacing any existing list.
+
+    These are topics granted to one person on request rather than offered on the
+    Google Form. They live in their own field because sync_recipients.py rewrites
+    `topics` from the form on every run — anything added there would be overwritten.
+    Pass [] to clear.
+    """
+    from config import TOPICS
+
+    db = _db()
+    if db is None:
+        raise RuntimeError("Firestore is not available.")
+
+    unknown = [t for t in topics if t not in TOPICS]
+    if unknown:
+        raise ValueError(f"Unknown topic(s) not in config.TOPICS: {unknown}")
+
+    doc_id = hashlib.sha256(email.strip().lower().encode()).hexdigest()
+    db.collection(RECIPIENTS_COLLECTION).document(doc_id).set(
+        {"extra_topics": topics}, merge=True
+    )
+    logger.info("Set extra topics for %s: %s", email, topics or "none")
+
+
 def deactivate_recipient(email: str) -> None:
     """Mark a recipient as inactive without deleting their record."""
     db = _db()
