@@ -12,7 +12,7 @@ import json
 import os
 import sys
 
-from state import save_recipient
+from state import mask_email, save_recipient
 
 
 def main():
@@ -27,7 +27,7 @@ def main():
     print(f"Migrating {len(recipients)} recipient(s) to Firestore...\n")
     for r in recipients:
         save_recipient(r)
-        print(f"  Migrated: {r.get('name')} <{r.get('email')}>")
+        print(f"  Migrated: {mask_email(r.get('email'))}")
 
     print(f"\nDone. {len(recipients)} recipient(s) are now in the Firestore 'recipients' collection.")
     print("You can verify them in the Firebase console and safely delete recipients.json.")

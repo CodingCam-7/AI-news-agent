@@ -18,6 +18,7 @@ class RankedItem:
     score: float
     matched_topics: list[str] = field(default_factory=list)
     summary: str = ""  # populated by summarizer.py
+    summary_failed: bool = False  # True when every summarization attempt failed
 
 
 def _phrases_for(topic: str) -> list[str]:

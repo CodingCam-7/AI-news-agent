@@ -26,6 +26,27 @@ _EMAIL_RE = re.compile(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$')
 _db_client = None
 
 
+def mask_email(email: str | None) -> str:
+    """
+    Redact an address for logging: 'recipient3@example.com' -> 's***@gmail.com'.
+
+    The digest runs in GitHub Actions, and on a public repository workflow logs
+    are world-readable — so a recipient's address must never be written to
+    stdout in full. The first character and the domain are kept so you can still
+    tell which run belongs to whom; the fixed '***' hides the local part's
+    length so the address can't be reconstructed from it.
+
+    Use this for every log line, print, and exception message that touches a
+    recipient address. It is not needed for the digest emails themselves.
+    """
+    if not email:
+        return "(no address)"
+    local, sep, domain = email.strip().partition("@")
+    if not sep or not local:
+        return "***"
+    return f"{local[0]}***@{domain}"
+
+
 def _db():
     global _db_client
     if _db_client is not None:
@@ -115,11 +136,11 @@ def save_recipient(recipient: dict) -> None:
     if not email:
         raise ValueError("Recipient must have an email address.")
     if not _EMAIL_RE.match(email):
-        raise ValueError(f"Invalid email address: {email!r}")
+        raise ValueError(f"Invalid email address: {mask_email(email)}")
     doc_id = hashlib.sha256(email.encode()).hexdigest()
     data = {**recipient, "email": email, "active": recipient.get("active", True)}
     db.collection(RECIPIENTS_COLLECTION).document(doc_id).set(data, merge=True)
-    logger.info("Saved recipient: %s", email)
+    logger.info("Saved recipient: %s", mask_email(email))
 
 
 def set_extra_topics(email: str, topics: list[str]) -> None:
@@ -145,7 +166,60 @@ def set_extra_topics(email: str, topics: list[str]) -> None:
     db.collection(RECIPIENTS_COLLECTION).document(doc_id).set(
         {"extra_topics": topics}, merge=True
     )
-    logger.info("Set extra topics for %s: %s", email, topics or "none")
+    logger.info("Set extra topics for %s: %s", mask_email(email), topics or "none")
+
+
+def set_name_override(email: str, name: str | None) -> None:
+    """
+    Set the display name used to greet a recipient, overriding the Google Form.
+
+    The form asks for a legal first name; some people would rather be greeted by
+    something else. Like `extra_topics`, this lives in its own field because
+    sync_recipients.py rewrites `name` from the form on every run — a value
+    hand-edited there would be wiped on the next digest. The sync never writes
+    `name_override`, and merge=True leaves absent fields untouched, so it
+    survives. Pass None to clear.
+
+    It is also why no name↔address mapping is hardcoded in source: this repo is
+    public, and that mapping is exactly the kind of personal data that must not
+    be published. Set it from a Python shell instead:
+
+        from state import set_name_override
+        set_name_override("person@example.com", "Preferred Name")
+    """
+    db = _db()
+    if db is None:
+        raise RuntimeError("Firestore is not available.")
+
+    doc_id = hashlib.sha256(email.strip().lower().encode()).hexdigest()
+    db.collection(RECIPIENTS_COLLECTION).document(doc_id).set(
+        {"name_override": name}, merge=True
+    )
+    logger.info("Set name override for %s: %s", mask_email(email), name or "cleared")
+
+
+def load_name_overrides() -> dict[str, str]:
+    """
+    Return {email: preferred_name} for every recipient that has one set.
+
+    Read in one query so the sync doesn't issue a Firestore round trip per row.
+    Returns {} when Firestore is unavailable — the sync then falls back to the
+    form-supplied name, which is correct behaviour rather than an error.
+    """
+    db = _db()
+    if db is None:
+        return {}
+    try:
+        overrides: dict[str, str] = {}
+        for doc in db.collection(RECIPIENTS_COLLECTION).stream():
+            d = doc.to_dict() or {}
+            email, override = d.get("email"), d.get("name_override")
+            if email and override:
+                overrides[email.strip().lower()] = override
+        return overrides
+    except Exception as exc:
+        logger.warning("Could not load name overrides from Firestore: %s", exc)
+        return {}
 
 
 def deactivate_recipient(email: str) -> None:
@@ -155,7 +229,7 @@ def deactivate_recipient(email: str) -> None:
         raise RuntimeError("Firestore is not available.")
     doc_id = hashlib.sha256(email.strip().lower().encode()).hexdigest()
     db.collection(RECIPIENTS_COLLECTION).document(doc_id).set({"active": False}, merge=True)
-    logger.info("Deactivated recipient: %s", email)
+    logger.info("Deactivated recipient: %s", mask_email(email))
 
 
 def mark_seen(urls: list[str]) -> None:

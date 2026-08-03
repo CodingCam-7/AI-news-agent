@@ -17,15 +17,20 @@ import smtplib
 import sys
 from email.mime.text import MIMEText
 
+from state import mask_email
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 logger = logging.getLogger(__name__)
 
 _EMAIL_RE = re.compile(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$')
 
-SHEET_ID = os.environ.get(
-    "GOOGLE_SHEET_ID",
-    "GOOGLE_SHEET_ID_REMOVED",
-)
+# The Google Sheet holding form responses. Read from the environment rather than
+# hardcoded: this repository is public, and a sheet ID is a durable pointer to a
+# file containing every respondent's name, address, and topic choices. The sheet
+# itself is access-controlled (the service account needs Viewer rights), so the
+# ID alone grants nothing — but it should not be published, so that a future
+# loosening of the sheet's sharing settings is not instantly exploitable.
+SHEET_ID = os.environ.get("GOOGLE_SHEET_ID", "").strip()
 
 # Maps Google Form display names → internal topic keys used in config.py and Firestore.
 FORM_TOPIC_MAP: dict[str, str] = {
@@ -68,14 +73,14 @@ COL_PRIORITY = [
 ]
 COL_ADDITIONAL = "Additional topic/s"
 
-# Greeting names that win over whatever the form says, keyed by email.
-# The form asks for a legal first name; these are the names those people actually
-# want to be greeted by in their digest.
-NAME_OVERRIDES: dict[str, str] = {
-    "recipient1@example.com": "Paps",
-}
+# Greeting names that win over whatever the form says are keyed by email, and so
+# live in Firestore (`name_override`) rather than here: this
+# repository is public, and a name-to-address mapping is personal data. Set one
+# with state.set_name_override(email, name). See CLAUDE.md.
 
-OWNER_EMAIL = "owner@example.com"
+# Where topic-suggestion notifications go. Defaults to the sending account, so
+# no extra secret is needed; set ALERT_EMAIL to route them elsewhere.
+OWNER_EMAIL = os.environ.get("ALERT_EMAIL") or os.environ.get("GMAIL_USER", "")
 SMTP_HOST   = "smtp.gmail.com"
 SMTP_PORT   = 587
 
@@ -190,6 +195,9 @@ def _notify_additional_topic(respondent_name: str, respondent_email: str, text: 
     if not gmail_user or not gmail_password:
         logger.warning("GMAIL_USER / GMAIL_APP_PASSWORD not set — cannot send additional-topic notification.")
         return
+    if not OWNER_EMAIL:
+        logger.warning("Neither ALERT_EMAIL nor GMAIL_USER is set — cannot route the notification.")
+        return
 
     subject = f"New topic suggestion from {respondent_name}"
     body = (
@@ -208,7 +216,7 @@ def _notify_additional_topic(respondent_name: str, respondent_email: str, text: 
             smtp.starttls()
             smtp.login(gmail_user, gmail_password)
             smtp.sendmail(gmail_user, OWNER_EMAIL, msg.as_string())
-        logger.info("Sent additional-topic notification for %s.", respondent_email)
+        logger.info("Sent additional-topic notification for %s.", mask_email(respondent_email))
     except Exception as exc:
         logger.warning("Failed to send additional-topic notification: %s", exc)
 
@@ -219,7 +227,16 @@ def sync() -> int:
     If a person submitted multiple times, only the latest response is used.
     Returns the number of recipients synced.
     """
-    from state import save_recipient
+    from state import load_name_overrides, save_recipient
+
+    if not SHEET_ID:
+        logger.error(
+            "GOOGLE_SHEET_ID is not set. It is no longer hardcoded — set it as a "
+            "GitHub Actions secret for CI, or export it locally. The value is the "
+            "long ID in the sheet's URL: "
+            "docs.google.com/spreadsheets/d/<THIS_PART>/edit"
+        )
+        sys.exit(1)
 
     client = _sheets_client()
     try:
@@ -236,19 +253,20 @@ def sync() -> int:
 
     # Keep only the latest submission per email address.
     latest: dict[str, dict] = {}
-    for row in records:
+    for idx, row in enumerate(records, start=1):
         email = _cell(row, COL_EMAIL).lower()
         if not email:
-            logger.warning("Skipping response with no email address (row: %r).", _cell(row, COL_NAME) or "unnamed")
+            logger.warning("Skipping response %d: no email address.", idx)
             continue
         if not _EMAIL_RE.match(email):
-            logger.warning("Skipping response with invalid email address: %r", email)
+            logger.warning("Skipping response with invalid email address: %s", mask_email(email))
             continue
         latest[email] = row
 
+    name_overrides = load_name_overrides()
     synced = 0
     for email, row in latest.items():
-        name   = NAME_OVERRIDES.get(email) or _cell(row, COL_NAME) or email
+        name   = name_overrides.get(email) or _cell(row, COL_NAME) or email
         topics = _parse_topics(row)
         priority = _parse_priority(row)
 
@@ -256,10 +274,10 @@ def sync() -> int:
         for p in priority:
             if p not in topics:
                 topics.append(p)
-                logger.info("Added priority topic %r to interests for %s.", p, email)
+                logger.info("Added priority topic %r to interests for %s.", p, mask_email(email))
 
         if not topics:
-            logger.warning("No topics selected for %s — skipping.", email)
+            logger.warning("No topics selected for %s — skipping.", mask_email(email))
             continue
 
         save_recipient({

@@ -24,13 +24,24 @@ from urllib.parse import urlparse
 
 from fetcher import fetch_all
 from ranker import RankedItem, rank
-from state import load_recipients, load_seen, mark_seen
+from state import load_recipients, load_seen, mark_seen, mask_email
 from summarizer import overview, summarize
 
 logger = logging.getLogger(__name__)
 
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
+
+# Shown in place of the summary when every summarization attempt failed for an
+# article. The card keeps its title and link, so the reader can still click
+# through or ask about what they missed.
+SUMMARY_UNAVAILABLE = "Summary unavailable for this article — reply if you'd like details."
+
+# Hold the whole digest when more than this share of summaries fail. A few
+# failures are ordinary (a thin article, a one-off refusal) and the notice above
+# covers them; a majority means something systemic — bad API key, wrong model
+# name, account issue — and a digest of mostly notices is worse than none.
+HOLD_FAILURE_RATIO = 0.5
 
 # Background color per topic — all light enough to read on white, black-outlined in the template.
 TOPIC_COLORS: dict[str, str] = {
@@ -116,10 +127,20 @@ def _topic_section_html(topic: str, items: list[RankedItem]) -> str:
         title = html.escape(r.item.title)
         summary = html.escape(r.summary) if r.summary else ""
         url = html.escape(_safe_url(r.item.url))
-        summary_block = f"""
+        if summary:
+            summary_block = f"""
             <tr><td style="padding:0 20px 14px;">
               <p style="margin:0;font-size:14px;line-height:1.7;color:#333;">{summary}</p>
-            </td></tr>""" if summary else ""
+            </td></tr>"""
+        elif r.summary_failed:
+            summary_block = f"""
+            <tr><td style="padding:0 20px 14px;">
+              <p style="margin:0;font-size:13px;line-height:1.7;color:#777;font-style:italic;">
+                {html.escape(SUMMARY_UNAVAILABLE)}
+              </p>
+            </td></tr>"""
+        else:
+            summary_block = ""
         cards += f"""
         <tr><td style="padding:0 24px 16px;">
           <table width="100%" cellpadding="0" cellspacing="0"
@@ -264,31 +285,70 @@ def _plain_body(
             lines += ["", r.item.title, f"{r.item.source} · {pub}", r.item.url]
             if r.summary:
                 lines += ["", r.summary]
+            elif r.summary_failed:
+                lines += ["", f"({SUMMARY_UNAVAILABLE})"]
     lines += ["", "-" * 60, "Delivered by AI News Agent"]
     return "\n".join(lines)
 
 
-def _send_alert(failures: list[str]) -> None:
-    """Email Cameron when summarization failures are detected. Digest is held until resolved."""
+def _send_alert(failures: list[str], attempted: int, held: bool) -> None:
+    """
+    Email Cameron when summarization failures are detected.
+
+    `held` distinguishes the two outcomes: a held digest went to nobody and needs
+    a re-run, whereas a sent digest already reached recipients with an
+    "unavailable" notice on the affected articles and needs no action beyond
+    knowing why. Either way the failed articles are left unmarked in Firestore,
+    so the next scheduled run retries them.
+    """
     gmail_user = os.environ.get("GMAIL_USER")
     gmail_password = os.environ.get("GMAIL_APP_PASSWORD")
     # Default to the sender address so no extra secret is needed in most setups.
     alert_email = os.environ.get("ALERT_EMAIL") or gmail_user
+    dry_run = os.environ.get("DRY_RUN", "").lower() in ("1", "true", "yes")
+
+    if dry_run:
+        # DRY_RUN promises no SMTP connection at all — print the alert instead.
+        print(f"\n[DRY RUN] Would alert {mask_email(alert_email)}: "
+              f"{len(failures)}/{attempted} summaries failed, digest "
+              f"{'HELD' if held else 'SENT'}.")
+        for f in failures:
+            print(f"  - {f}")
+        return
+
     if not gmail_user or not gmail_password or not alert_email:
         logger.error("Cannot send failure alert — GMAIL_USER / GMAIL_APP_PASSWORD not set.")
         return
 
     date_str = datetime.now().strftime("%B %d, %Y")
     n = len(failures)
-    subject = f"[ALERT] AI News Digest — {n} summarization failure(s) on {date_str}"
+    tag = "HELD" if held else "SENT"
+    subject = f"[ALERT] AI News Digest — {n}/{attempted} summaries failed on {date_str} (digest {tag})"
     failure_lines = "\n".join(f"  - {f}" for f in failures)
+
+    if held:
+        outcome = (
+            f"{n} of {attempted} article(s) failed summarization — over "
+            f"{HOLD_FAILURE_RATIO:.0%} of the digest, which usually means a "
+            f"systemic problem rather than a few bad articles.\n"
+            f"The digest was NOT sent to recipients.\n\n"
+            f"Re-run the workflow with FORCE_SEND=true once the issue is resolved."
+        )
+    else:
+        outcome = (
+            f"{n} of {attempted} article(s) failed summarization.\n"
+            f"The digest WAS sent — the affected articles appear with their title "
+            f"and link, and a note in place of the summary.\n\n"
+            f"No action needed unless the same articles keep failing. They were not "
+            f"marked as seen, so the next run will retry them."
+        )
+
     plain = (
         f"AI News Digest Alert — {date_str}\n"
         f"{'=' * 60}\n\n"
-        f"{n} article(s) failed summarization. The digest was NOT sent to recipients.\n\n"
+        f"{outcome}\n\n"
         f"Failed articles:\n{failure_lines}\n\n"
         f"To investigate: check the GitHub Actions logs for WARNING messages.\n"
-        f"Re-run the workflow with FORCE_SEND=true once the issue is resolved.\n"
     )
 
     msg = MIMEMultipart("alternative")
@@ -303,7 +363,10 @@ def _send_alert(failures: list[str]) -> None:
         smtp.login(gmail_user, gmail_password)
         smtp.sendmail(gmail_user, alert_email, msg.as_string())
 
-    print(f"[ALERT] Failure alert sent to {alert_email}. Digest held — re-run with FORCE_SEND=true once resolved.")
+    if held:
+        print(f"[ALERT] Sent to {mask_email(alert_email)}. Digest held — re-run with FORCE_SEND=true once resolved.")
+    else:
+        print(f"[ALERT] Sent to {mask_email(alert_email)}. Digest still sent with {n} 'summary unavailable' notice(s).")
 
 
 def send_digest(ranked: list[RankedItem]) -> None:
@@ -340,9 +403,9 @@ def send_digest(ranked: list[RankedItem]) -> None:
     if only_email:
         recipients = [r for r in recipients if r["email"].strip().lower() == only_email]
         if not recipients:
-            logger.warning("ONLY_EMAIL=%s matched no active recipient — nothing to send.", only_email)
+            logger.warning("ONLY_EMAIL=%s matched no active recipient — nothing to send.", mask_email(only_email))
             return
-        print(f"ONLY_EMAIL set — restricting send to {only_email} ({len(recipients)} recipient).")
+        print(f"ONLY_EMAIL set — restricting send to {mask_email(only_email)} ({len(recipients)} recipient).")
 
     # Build each recipient's article set and opening brief BEFORE opening the SMTP
     # connection — the brief costs an API call per recipient, and holding the SMTP
@@ -354,14 +417,14 @@ def send_digest(ranked: list[RankedItem]) -> None:
             if any(t in r.matched_topics for t in _all_topics(recipient))
         ]
         if not recipient_items:
-            logger.warning("No matched items for %s — skipping.", recipient["email"])
+            logger.warning("No matched items for %s — skipping.", mask_email(recipient["email"]))
             continue
 
         # The brief is a nice-to-have: on failure we drop it and send the digest anyway.
         try:
             brief = overview(recipient_items, recipient)
         except Exception as exc:
-            logger.warning("Opening brief failed for %s: %s", recipient["email"], exc)
+            logger.warning("Opening brief failed for %s: %s", mask_email(recipient["email"]), exc)
             brief = None
 
         outgoing.append((recipient, recipient_items, brief))
@@ -373,7 +436,7 @@ def send_digest(ranked: list[RankedItem]) -> None:
     if dry_run:
         for recipient, recipient_items, brief in outgoing:
             print(f"\n{'#' * 70}")
-            print(f"# DRY RUN — would send to {recipient['name']} <{recipient['email']}> "
+            print(f"# DRY RUN — would send to {mask_email(recipient['email'])} "
                   f"({len(recipient_items)} article(s))")
             print(f"{'#' * 70}")
             print(_plain_body(recipient_items, recipient, date_str, brief))
@@ -395,7 +458,7 @@ def send_digest(ranked: list[RankedItem]) -> None:
             msg.attach(MIMEText(_html_body(recipient_items, recipient, date_str, brief), "html"))
 
             smtp.sendmail(gmail_user, recipient["email"], msg.as_string())
-            print(f"Digest sent to {recipient['name']} <{recipient['email']}> ({len(recipient_items)} article(s)).")
+            print(f"Digest sent to {mask_email(recipient['email'])} ({len(recipient_items)} article(s)).")
 
 
 # ── entry point ───────────────────────────────────────────────────────────────
@@ -419,12 +482,23 @@ if __name__ == "__main__":
         if skipped:
             print(f"Skipping {skipped} already-sent item(s).")
 
-    new_ranked, failures = summarize(new_ranked)
+    new_ranked, failures, attempted = summarize(new_ranked)
+
+    # A minority of failures is survivable: those articles ship with a notice in
+    # place of the summary, so nobody loses the rest of the digest over one bad
+    # article. A majority points at something systemic, so hold and alert.
+    held = bool(failures) and len(failures) > attempted * HOLD_FAILURE_RATIO
     if failures:
-        _send_alert(failures)
+        _send_alert(failures, attempted, held)
+    # Under DRY_RUN a hold would suppress the very preview being asked for, so
+    # note it and carry on to print the digest instead of exiting.
+    if held and os.environ.get("DRY_RUN", "").lower() not in ("1", "true", "yes"):
         sys.exit(1)
 
     send_digest(new_ranked)
 
-    # Persist sent URLs so they're skipped on the next run.
-    mark_seen([r.item.url for r in new_ranked if r.score > 0])
+    # Persist sent URLs so they're skipped on the next run — except the ones that
+    # failed summarization. Leaving those unseen means the next run re-fetches and
+    # re-summarizes them, so a transient failure self-heals and the article still
+    # reaches people (until it ages out of the LOOKBACK_DAYS window).
+    mark_seen([r.item.url for r in new_ranked if r.score > 0 and not r.summary_failed])
