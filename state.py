@@ -28,7 +28,7 @@ _db_client = None
 
 def mask_email(email: str | None) -> str:
     """
-    Redact an address for logging: 'recipient3@example.com' -> 's***@gmail.com'.
+    Redact an address for logging: 'someone@example.com' -> 's***@example.com'.
 
     The digest runs in GitHub Actions, and on a public repository workflow logs
     are world-readable — so a recipient's address must never be written to
