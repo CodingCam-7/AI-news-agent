@@ -287,9 +287,12 @@ def sync() -> int:
             "priority": priority,
             "active":   True,
         })
+        # Identify the row by masked address, never by name: this log is public on
+        # a public repo, and a name printed next to a masked address undoes most of
+        # the masking ("Sam" + "s***@gmail.com" narrows the address to a guess).
         logger.info(
             "Synced: %s — %d topic(s), priority: %s",
-            name, len(topics), priority or "none set",
+            mask_email(email), len(topics), priority or "none set",
         )
 
         additional = _cell(row, COL_ADDITIONAL)
