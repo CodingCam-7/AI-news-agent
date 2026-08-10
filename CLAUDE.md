@@ -39,7 +39,7 @@ This is a pipeline project being built incrementally. Each step is planned as it
 2. **Rank** (`ranker.py`) — done. Scores items against `TOPICS`; wraps each in `RankedItem(item, score, matched_topics)`.
 3. **Summarize** (`summarizer.py`) — done. Calls Claude Haiku for 2-3 sentence summaries; populates `RankedItem.summary`.
 4. **Email** (`emailer.py`) — done. Formats digest as HTML+plain-text and sends via Gmail SMTP.
-5. **State / scheduling** — done. `state.py` reads/writes seen article URLs to Firestore; `.github/workflows/digest.yml` runs `emailer.py` on a cron every 2 days.
+5. **State / scheduling** — done. `state.py` reads/writes seen article URLs to Firestore; `.github/workflows/digest.yml` runs `emailer.py` on a cron every 3 days.
 
 `fetcher.py` owns the `NewsItem` dataclass and all fetch logic. `ranker.py` owns `RankedItem` and scoring; it imports `fetch_all()` directly and can be run standalone. `config.py` holds the shared configuration (`RSS_FEEDS`, `TOPICS`, `TOPIC_ALIASES`) imported by all steps.
 
