@@ -191,8 +191,12 @@ def _brief_html(brief: tuple[str, list[str]] | None) -> str:
             {html.escape(hook)}
           </p>""" if hook else ""
 
+    # Top and bottom padding are deliberately equal: the brief is a floating card
+    # between the header and the first topic banner, and matching gaps keep it
+    # centred in that space. An asymmetric value makes it look stuck to whichever
+    # edge it is nearer.
     return f"""
-        <tr><td style="padding:24px 24px 4px;">
+        <tr><td style="padding:24px 24px 24px;">
           <table width="100%" cellpadding="0" cellspacing="0"
                  style="border:2px solid #000;background:#dcfce7;">
             <tr><td style="padding:16px 20px 6px;">
