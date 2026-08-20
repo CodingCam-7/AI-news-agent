@@ -188,16 +188,23 @@ def _parse_priority(row: dict) -> list[str]:
     return priority
 
 
-def _notify_additional_topic(respondent_name: str, respondent_email: str, text: str) -> None:
-    """Email the owner when a respondent suggests an additional topic."""
+def _notify_additional_topic(respondent_name: str, respondent_email: str, text: str) -> bool:
+    """
+    Email the owner when a respondent suggests an additional topic.
+
+    Returns True only if the mail was actually handed to Gmail. The caller records
+    the suggestion as notified on a True, so a send that never happened must not
+    report success — otherwise the suggestion would be marked handled and silently
+    never reach the owner.
+    """
     gmail_user     = os.environ.get("GMAIL_USER")
     gmail_password = os.environ.get("GMAIL_APP_PASSWORD")
     if not gmail_user or not gmail_password:
         logger.warning("GMAIL_USER / GMAIL_APP_PASSWORD not set — cannot send additional-topic notification.")
-        return
+        return False
     if not OWNER_EMAIL:
         logger.warning("Neither ALERT_EMAIL nor GMAIL_USER is set — cannot route the notification.")
-        return
+        return False
 
     subject = f"New topic suggestion from {respondent_name}"
     body = (
@@ -217,8 +224,10 @@ def _notify_additional_topic(respondent_name: str, respondent_email: str, text: 
             smtp.login(gmail_user, gmail_password)
             smtp.sendmail(gmail_user, OWNER_EMAIL, msg.as_string())
         logger.info("Sent additional-topic notification for %s.", mask_email(respondent_email))
+        return True
     except Exception as exc:
         logger.warning("Failed to send additional-topic notification: %s", exc)
+        return False
 
 
 def sync() -> int:
@@ -227,7 +236,13 @@ def sync() -> int:
     If a person submitted multiple times, only the latest response is used.
     Returns the number of recipients synced.
     """
-    from state import load_name_overrides, save_recipient
+    from state import (
+        load_name_overrides,
+        load_notified_suggestions,
+        mark_suggestion_notified,
+        save_recipient,
+        suggestion_fingerprint,
+    )
 
     if not SHEET_ID:
         logger.error(
@@ -264,6 +279,7 @@ def sync() -> int:
         latest[email] = row
 
     name_overrides = load_name_overrides()
+    notified_suggestions = load_notified_suggestions()
     synced = 0
     for email, row in latest.items():
         name   = name_overrides.get(email) or _cell(row, COL_NAME) or email
@@ -295,9 +311,26 @@ def sync() -> int:
             mask_email(email), len(topics), priority or "none set",
         )
 
+        # Notify the owner once per distinct suggestion, not once per run. A response
+        # sits in the sheet forever, and this sync runs before every digest, so an
+        # unconditional notify re-sends the same suggestion every few days for as long
+        # as the row exists. Fingerprinting the text means an edited or replaced
+        # suggestion still pages, while an unchanged one goes quiet after the first.
         additional = _cell(row, COL_ADDITIONAL)
         if additional:
-            _notify_additional_topic(name, email, additional)
+            fingerprint = suggestion_fingerprint(additional)
+            if notified_suggestions.get(email) == fingerprint:
+                logger.info("Suggestion unchanged for %s — not re-notifying.", mask_email(email))
+            elif _notify_additional_topic(name, email, additional):
+                try:
+                    mark_suggestion_notified(email, fingerprint)
+                except Exception as exc:
+                    # Best-effort: failing to record costs one duplicate next run,
+                    # which is not worth aborting a sync that already succeeded.
+                    logger.warning(
+                        "Could not record suggestion notification for %s: %s",
+                        mask_email(email), exc,
+                    )
 
         synced += 1
 

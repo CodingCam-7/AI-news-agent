@@ -222,6 +222,61 @@ def load_name_overrides() -> dict[str, str]:
         return {}
 
 
+def suggestion_fingerprint(text: str) -> str:
+    """
+    Stable ID for one suggestion's text, so the owner is paged about it exactly once.
+
+    Whitespace is collapsed and the text case-folded before hashing: the sheet keeps
+    a respondent's latest submission, and re-submitting the form with the same
+    suggestion typed slightly differently should not read as a new one.
+    """
+    return hashlib.sha1(" ".join(text.split()).casefold().encode()).hexdigest()
+
+
+def load_notified_suggestions() -> dict[str, str]:
+    """
+    Return {email: fingerprint} of the suggestion each recipient was last notified about.
+
+    Read in one query so the sync doesn't issue a Firestore round trip per row, the
+    same way load_name_overrides() does. Returns {} when Firestore is unavailable —
+    the sync then notifies, because a duplicate email is a better failure than a
+    suggestion that never reaches the owner.
+    """
+    db = _db()
+    if db is None:
+        return {}
+    try:
+        notified: dict[str, str] = {}
+        for doc in db.collection(RECIPIENTS_COLLECTION).stream():
+            d = doc.to_dict() or {}
+            email, fingerprint = d.get("email"), d.get("notified_suggestion")
+            if email and fingerprint:
+                notified[email.strip().lower()] = fingerprint
+        return notified
+    except Exception as exc:
+        logger.warning("Could not load notified suggestions from Firestore: %s", exc)
+        return {}
+
+
+def mark_suggestion_notified(email: str, fingerprint: str) -> None:
+    """
+    Record that the owner has been emailed about a recipient's current suggestion.
+
+    Lives in its own field for the same reason as `extra_topics` and `name_override`:
+    sync_recipients.py rewrites the form-derived fields wholesale on every run and
+    never writes this one, so merge=True leaves it intact.
+    """
+    db = _db()
+    if db is None:
+        raise RuntimeError("Firestore is not available.")
+
+    doc_id = hashlib.sha256(email.strip().lower().encode()).hexdigest()
+    db.collection(RECIPIENTS_COLLECTION).document(doc_id).set(
+        {"notified_suggestion": fingerprint}, merge=True
+    )
+    logger.info("Recorded suggestion notification for %s.", mask_email(email))
+
+
 def deactivate_recipient(email: str) -> None:
     """Mark a recipient as inactive without deleting their record."""
     db = _db()
